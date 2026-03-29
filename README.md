@@ -15,6 +15,11 @@
 - 字幕文本输出（时间戳分段：`subtitle_segments`）
 - 思维导图输出（`mindmap_mermaid`），前端可视化渲染
 - 前端工作台 V2（浅色紧凑布局，桌面端 `40%:60%`，任务中心次级折叠）
+- 邮箱密码账号体系（注册/登录，JWT 鉴权）
+- 会员支付（Stripe Checkout，CNY，Webhook 验签与幂等）
+- AI 额度策略（免费用户每日 5 次，VIP 不限）
+- 密码找回（邮箱重置链接）
+- 账单/订单历史查询
 
 ## 技术栈
 
@@ -79,6 +84,11 @@ npm run dev
 ## 关键接口
 
 - `GET /api/health`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/request-password-reset`
+- `POST /api/auth/reset-password`
 - `POST /api/video/inspect`
 - `POST /api/video/download`
 - `POST /api/video/download/batch`
@@ -89,6 +99,10 @@ npm run dev
 - `GET /api/video/thumbnail`
 - `POST /api/ai-summary/stream`（SSE）
 - `POST /api/video/subtitles/download`（字幕导出：`txt/srt/vtt`）
+- `POST /api/billing/checkout-session`
+- `GET /api/billing/membership-status`
+- `GET /api/billing/orders`
+- `POST /api/billing/webhook`
 
 ### AI 总结结果字段（`result` 事件）
 
@@ -108,11 +122,28 @@ npm run dev
 - `DOWNLOADS_DIR`
 - `MAX_PARALLEL_DOWNLOADS`
 - `REQUEST_TIMEOUT_SECONDS`
+- `SQLITE_DB_PATH`
+- `JWT_SECRET_KEY`
+- `JWT_EXPIRE_MINUTES`
+- `PASSWORD_BCRYPT_ROUNDS`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `SMTP_FROM_EMAIL`
+- `SMTP_USE_TLS`
+- `APP_PUBLIC_BASE_URL`
+- `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES`
 - `DEEPSEEK_API_KEY`
 - `DEEPSEEK_BASE_URL`
 - `DEEPSEEK_MODEL`
 - `DEEPSEEK_TIMEOUT_SECONDS`
 - `DEEPSEEK_PROXY_URL`（可选，DeepSeek 显式代理）
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRICE_CNY_1M`
+- `STRIPE_SUCCESS_URL`
+- `STRIPE_CANCEL_URL`
 - `YTDLP_COOKIEFILE`（可选，平台登录态 cookie 文件）
 - `YTDLP_COOKIES_FROM_BROWSER`（可选，从浏览器读取 cookie）
 
@@ -121,9 +152,9 @@ npm run dev
 ## 现阶段限制
 
 - 任务状态仅存内存，重启后丢失
-- 暂无账号体系、支付、配额控制
 - 暂无任务持久化与监控告警
 - AI 总结依赖平台可用字幕；若平台未返回字幕则无法生成总结
+- 密码重置依赖 SMTP 配置正确，邮件通道异常时无法完成找回流程
 
 ## 文档
 
@@ -131,6 +162,7 @@ npm run dev
 - `docs/方案设计文档.md`
 - `docs/项目总结文档.md`
 - `docs/AI总结接口说明.md`
+- `docs/会员系统开发进度.md`
 
 ## 前端 UI V2 说明（2026-03）
 
@@ -151,8 +183,8 @@ npm run dev
 
 - 数据库持久化（用户/任务/订阅）
 - 异步任务队列（Redis + Worker）
-- 会员体系（支付、配额、并发）
-- AI 能力（视频总结、字幕翻译）
+- 会员体系增强（退款/争议单处理、更多套餐）
+- AI 能力增强（视频总结、字幕翻译）
 
 ## 合规说明
 
