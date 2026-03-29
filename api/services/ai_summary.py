@@ -17,6 +17,7 @@ class SummaryPayload:
     summary: str
     outline: list[str]
     key_points: list[str]
+    mindmap_mermaid: str
 
 
 class DeepSeekSummaryService:
@@ -112,9 +113,17 @@ class DeepSeekSummaryService:
         summary = str(data.get("summary") or "").strip()
         outline = [str(item).strip() for item in (data.get("outline") or []) if str(item).strip()]
         key_points = [str(item).strip() for item in (data.get("key_points") or []) if str(item).strip()]
+        mindmap_mermaid = str(data.get("mindmap_mermaid") or "").strip()
         if not summary and not outline and not key_points:
             raise AISummaryError("AI output has no valid summary fields.")
-        return SummaryPayload(summary=summary, outline=outline, key_points=key_points)
+        if not mindmap_mermaid:
+            mindmap_mermaid = DeepSeekSummaryService._outline_to_mermaid(outline or key_points or ["Summary"])
+        return SummaryPayload(
+            summary=summary,
+            outline=outline,
+            key_points=key_points,
+            mindmap_mermaid=mindmap_mermaid,
+        )
 
     @staticmethod
     def _build_prompt(transcript_text: str) -> str:
@@ -124,10 +133,20 @@ class DeepSeekSummaryService:
             "输出要求：\n"
             "1) 只输出 JSON，不要使用 markdown。\n"
             "2) JSON schema 必须为："
-            '{"summary":"string","outline":["string"],"key_points":["string"]}\n'
+            '{"summary":"string","outline":["string"],"key_points":["string"],"mindmap_mermaid":"string"}\n'
             "3) summary 用 120-220 字概括视频主旨。\n"
             "4) outline 输出 4-8 条按逻辑顺序的大纲。\n"
-            "5) key_points 输出 5-10 条可执行/可记忆知识点。\n\n"
+            "5) key_points 输出 5-10 条可执行/可记忆知识点。\n"
+            "6) mindmap_mermaid 必须是合法 mermaid mindmap 代码，根节点使用 VideoSummary。\n\n"
             f"字幕内容：\n{clipped}"
         )
+
+    @staticmethod
+    def _outline_to_mermaid(items: list[str]) -> str:
+        lines = ["mindmap", "  root((VideoSummary))"]
+        for item in items[:10]:
+            safe = item.replace("\n", " ").replace("\"", "'").strip()
+            if safe:
+                lines.append(f"    {safe}")
+        return "\n".join(lines)
 

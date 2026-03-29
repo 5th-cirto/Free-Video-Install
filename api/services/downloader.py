@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yt_dlp
 
@@ -18,6 +19,7 @@ class DownloadService:
         self._ffmpeg_location = self._detect_ffmpeg_location()
 
     def inspect(self, url: str) -> dict[str, Any]:
+        url = self._normalize_video_url(url)
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -40,6 +42,7 @@ class DownloadService:
         format_id: Optional[str],
         progress_callback: Optional[Callable[[float], None]] = None,
     ) -> dict[str, Any]:
+        url = self._normalize_video_url(url)
         format_selector = self._build_format_selector(url, format_id)
         outtmpl = str(self._downloads_dir / "%(id)s_%(title).80s.%(ext)s")
 
@@ -256,4 +259,17 @@ class DownloadService:
                 }
             }
         return {}
+
+    @staticmethod
+    def _normalize_video_url(url: str) -> str:
+        value = (url or "").strip()
+        if not value:
+            return value
+        if "bilibili.com/video/" not in value:
+            return value
+        split = urlsplit(value)
+        query_pairs = parse_qsl(split.query, keep_blank_values=False)
+        keep_keys = {"p", "t"}
+        cleaned_query = urlencode([(k, v) for k, v in query_pairs if k in keep_keys])
+        return urlunsplit((split.scheme, split.netloc, split.path, cleaned_query, ""))
 

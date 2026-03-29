@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import re
 from pathlib import Path
 import os
 import subprocess
@@ -11,7 +12,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from api.config import settings
-from api.schemas import BatchDownloadRequest, DownloadRequest, InspectRequest
+from api.schemas import BatchDownloadRequest, DownloadRequest, InspectRequest, SubtitleDownloadRequest
+from api.services.subtitle_extractor import SubtitleExtractor, SubtitleExtractorError
 from api.services.downloader import DownloadService, DownloaderError
 from api.services.tasks import TaskManager
 
@@ -22,6 +24,7 @@ download_service = DownloadService(
     downloads_dir=settings.downloads_dir,
     timeout_seconds=settings.request_timeout_seconds,
 )
+subtitle_extractor = SubtitleExtractor(timeout_seconds=settings.request_timeout_seconds)
 executor = ThreadPoolExecutor(max_workers=max(settings.max_parallel_downloads, 2))
 
 
@@ -40,6 +43,55 @@ def _run_download(task_id: str, url: str, format_id: Optional[str]) -> None:
 
 def _progress_hook(task_id: str, progress: float) -> None:
     task_manager.update(task_id, progress=progress)
+
+
+def _format_subtitle_time(seconds: float, *, srt_style: bool) -> str:
+    total_ms = max(0, int(round((seconds or 0.0) * 1000)))
+    hours = total_ms // 3_600_000
+    minutes = (total_ms % 3_600_000) // 60_000
+    secs = (total_ms % 60_000) // 1000
+    millis = total_ms % 1000
+    separator = "," if srt_style else "."
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}{separator}{millis:03d}"
+
+
+def _segments_to_srt(segments: list[dict[str, Any]]) -> str:
+    rows = []
+    for idx, seg in enumerate(segments, start=1):
+        start = _format_subtitle_time(float(seg.get("start") or 0.0), srt_style=True)
+        end = _format_subtitle_time(float(seg.get("end") or 0.0), srt_style=True)
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue
+        rows.append(f"{idx}\n{start} --> {end}\n{text}")
+    return "\n\n".join(rows).strip()
+
+
+def _segments_to_vtt(segments: list[dict[str, Any]]) -> str:
+    rows = ["WEBVTT", ""]
+    for seg in segments:
+        start = _format_subtitle_time(float(seg.get("start") or 0.0), srt_style=False)
+        end = _format_subtitle_time(float(seg.get("end") or 0.0), srt_style=False)
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue
+        rows.append(f"{start} --> {end}")
+        rows.append(text)
+        rows.append("")
+    return "\n".join(rows).strip()
+
+
+def _build_subtitle_content(format_name: str, subtitle_text: str, segments: list[dict[str, Any]]) -> tuple[str, str]:
+    if format_name == "txt":
+        return subtitle_text.strip(), "text/plain; charset=utf-8"
+    if format_name == "vtt":
+        return _segments_to_vtt(segments), "text/vtt; charset=utf-8"
+    return _segments_to_srt(segments), "application/x-subrip; charset=utf-8"
+
+
+def _safe_filename(value: str) -> str:
+    cleaned = re.sub(r"[^\w\-.]+", "_", value.strip(), flags=re.UNICODE)
+    return cleaned[:80] or "subtitle"
 
 
 @router.post("/inspect")
@@ -65,6 +117,24 @@ def create_batch_download(payload: BatchDownloadRequest) -> dict[str, Any]:
         tasks.append(task)
         executor.submit(_run_download, task["task_id"], url, payload.format_id)
     return {"success": True, "message": "batch tasks created", "data": {"tasks": tasks}}
+
+
+@router.post("/subtitles/download")
+def download_subtitles(payload: SubtitleDownloadRequest) -> Response:
+    try:
+        result = subtitle_extractor.extract_text(payload.url.strip(), payload.language)
+        content, media_type = _build_subtitle_content(payload.format, result.text, result.segments)
+    except SubtitleExtractorError as exc:
+        raise HTTPException(status_code=400, detail=f"Subtitle extraction failed: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Subtitle export failed: {exc}") from exc
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Subtitle content is empty.")
+
+    filename = _safe_filename(f"subtitle_{result.language}.{payload.format}")
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=content.encode("utf-8"), media_type=media_type, headers=headers)
 
 
 @router.get("/tasks")

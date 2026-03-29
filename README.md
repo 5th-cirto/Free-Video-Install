@@ -12,6 +12,8 @@
 - 一键打开本地文件位置
 - AI 视频总结（SSE 流式输出：`summary / outline / key_points`）
 - 平台字幕优先提取（含 B 站字幕 API 兜底，不启用 Whisper）
+- 字幕文本输出（时间戳分段：`subtitle_segments`）
+- 思维导图输出（`mindmap_mermaid`），前端可视化渲染
 
 ## 技术栈
 
@@ -83,6 +85,15 @@ npm run dev
 - `POST /api/video/open-path`
 - `GET /api/video/thumbnail`
 - `POST /api/ai-summary/stream`（SSE）
+
+### AI 总结结果字段（`result` 事件）
+
+- `summary`：摘要
+- `outline`：大纲列表
+- `key_points`：核心要点列表
+- `mindmap_mermaid`：Mermaid 思维导图源码
+- `subtitle_text`：字幕全文文本
+- `subtitle_segments`：带时间戳字幕分段（`start/end/text`）
 
 ## 配置说明
 
