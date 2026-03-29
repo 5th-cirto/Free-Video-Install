@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node/Vite
+backend/node_modules/
+backend/dist/
+
+# Runtime outputs
+downloads/
+*.log
+
+# Large local assets
+ffmpeg.zip
+tools/
+
+# IDE and local metadata
+.cursor/
+.claude/
+
