@@ -1,4 +1,5 @@
 <script setup>
+// 顶部状态栏仅负责展示汇总信息，不包含业务逻辑。
 defineProps({
   runningCount: { type: Number, default: 0 },
   successCount: { type: Number, default: 0 },
@@ -7,6 +8,7 @@ defineProps({
 </script>
 
 <template>
+  <!-- 页面顶部：品牌 + 任务统计 -->
   <header class="top-nav">
     <div class="brand-wrap">
       <span class="badge">PRO</span>
@@ -24,6 +26,7 @@ defineProps({
 </template>
 
 <style scoped>
+/* 顶部容器 */
 .top-nav {
   border-radius: 16px;
   border: 1px solid #d7e2f3;
@@ -36,6 +39,7 @@ defineProps({
   box-shadow: 0 8px 24px rgba(21, 45, 90, 0.08);
 }
 
+/* 左侧品牌区 */
 .brand-wrap {
   display: flex;
   align-items: center;
@@ -68,6 +72,7 @@ defineProps({
   font-size: 12px;
 }
 
+/* 右侧统计标签 */
 .quick-stats {
   display: flex;
   align-items: center;
@@ -85,6 +90,7 @@ defineProps({
   white-space: nowrap;
 }
 
+/* 小屏下改为纵向布局，避免挤压 */
 @media (max-width: 960px) {
   .top-nav {
     flex-direction: column;

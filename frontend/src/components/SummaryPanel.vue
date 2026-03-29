@@ -1,4 +1,7 @@
 <script setup>
+// AI 总结展示区：
+// - 负责展示不同页签（摘要/大纲/导图/字幕）
+// - 只做展示与事件转发，不直接调用 API
 defineProps({
   aiStage: { type: String, default: '' },
   aiLoading: { type: Boolean, default: false },
@@ -16,6 +19,7 @@ defineProps({
   formatTimestamp: { type: Function, required: true },
 })
 
+// 向父组件抛出操作事件（切 tab、下载导图、下载字幕等）。
 const emit = defineEmits([
   'update:aiViewTab',
   'openMindmapFullscreen',
@@ -25,6 +29,7 @@ const emit = defineEmits([
 </script>
 
 <template>
+  <!-- 右侧 AI 总结区 -->
   <section class="panel right-pane">
     <div class="panel-head">
       <h2>AI 总结结果</h2>
@@ -36,6 +41,7 @@ const emit = defineEmits([
 
     <p v-if="aiError" class="error">{{ aiError }}</p>
 
+    <!-- 结果页签切换 -->
     <div class="result-tabs">
       <button :class="{ active: aiViewTab === 'summary' }" @click="emit('update:aiViewTab', 'summary')">总结摘要</button>
       <button :class="{ active: aiViewTab === 'outline' }" @click="emit('update:aiViewTab', 'outline')">章节总结</button>
@@ -43,7 +49,9 @@ const emit = defineEmits([
       <button :class="{ active: aiViewTab === 'subtitle' }" @click="emit('update:aiViewTab', 'subtitle')">字幕内容</button>
     </div>
 
+    <!-- 有内容时显示结果，无内容时显示占位提示 -->
     <div class="result-body" v-if="hasAiContent">
+      <!-- 摘要页签 -->
       <div v-if="aiViewTab === 'summary'">
         <p class="meta"><strong>总结</strong></p>
         <p class="content-text">{{ aiStreamingSummary || '等待结构化总结输出...' }}</p>
@@ -59,6 +67,7 @@ const emit = defineEmits([
         </details>
       </div>
 
+      <!-- 大纲页签 -->
       <div v-if="aiViewTab === 'outline'" class="list-box">
         <p class="meta"><strong>章节大纲</strong></p>
         <ul v-if="aiDisplayResult.outline?.length">
@@ -67,6 +76,7 @@ const emit = defineEmits([
         <p v-else class="hint">等待大纲流式输出...</p>
       </div>
 
+      <!-- 导图页签 -->
       <div v-if="aiViewTab === 'mindmap'" class="list-box">
         <div class="mindmap-actions">
           <button class="open-btn" :disabled="!mindmapSvg" @click="emit('openMindmapFullscreen')">全屏预览</button>
@@ -78,6 +88,7 @@ const emit = defineEmits([
         <p v-if="mindmapRenderError" class="error">{{ mindmapRenderError }}</p>
       </div>
 
+      <!-- 字幕页签 -->
       <div v-if="aiViewTab === 'subtitle'" class="list-box">
         <p class="meta"><strong>字幕分段</strong></p>
         <div class="mindmap-actions">
@@ -98,6 +109,7 @@ const emit = defineEmits([
 </template>
 
 <style scoped>
+/* 基础卡片 */
 .panel {
   border: 1px solid #d7e2f3;
   background: #fff;
@@ -106,6 +118,7 @@ const emit = defineEmits([
   box-shadow: 0 10px 28px rgba(21, 45, 90, 0.07);
 }
 
+/* 右栏纵向布局，主体内容允许内部滚动 */
 .right-pane {
   display: flex;
   flex-direction: column;
@@ -140,6 +153,7 @@ h2 {
   padding: 5px 9px;
 }
 
+/* 页签样式 */
 .result-tabs {
   margin-top: 10px;
   display: flex;
@@ -180,6 +194,7 @@ h2 {
   font-size: 13px;
 }
 
+/* 结果内容基础排版 */
 .content-text {
   margin: 6px 0 0;
   font-size: 14px;

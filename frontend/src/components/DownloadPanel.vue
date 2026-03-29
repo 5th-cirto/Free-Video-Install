@@ -1,4 +1,7 @@
 <script setup>
+// 下载工作台：
+// - 负责展示输入区、解析结果、格式选择、下载提交
+// - 业务数据由父组件 App.vue 提供
 const props = defineProps({
   mode: { type: String, default: 'single' },
   singleUrl: { type: String, default: '' },
@@ -15,6 +18,7 @@ const props = defineProps({
   thumbnailUrl: { type: Function, required: true },
 })
 
+// 事件全部向上抛给父组件，保持此组件为“展示 + 交互触发”角色。
 const emit = defineEmits([
   'update:mode',
   'update:singleUrl',
@@ -25,12 +29,14 @@ const emit = defineEmits([
   'createBatchDownload',
 ])
 
+// 统一处理 input/select 的值变更，减少模板里的重复代码。
 function updateValue(eventName, event) {
   emit(eventName, event?.target?.value || '')
 }
 </script>
 
 <template>
+  <!-- 左侧下载工作台 -->
   <aside class="panel left-pane">
     <div class="panel-head">
       <h2>下载工作台</h2>
@@ -40,6 +46,7 @@ function updateValue(eventName, event) {
       </div>
     </div>
 
+    <!-- 解析成功后显示视频封面与元信息 -->
     <div v-if="inspectInfo" class="hero-video">
       <div class="hero-video-media">
         <img v-if="inspectInfo.thumbnail" :src="thumbnailUrl(inspectInfo.thumbnail)" alt="thumbnail" />
@@ -55,6 +62,7 @@ function updateValue(eventName, event) {
     </div>
     <div v-else class="empty">输入链接后解析，右侧会自动开始 AI 总结。</div>
 
+    <!-- 单条模式 -->
     <div v-if="mode === 'single'" class="field-group">
       <label>视频链接</label>
       <input
@@ -69,6 +77,7 @@ function updateValue(eventName, event) {
       <p v-if="inspectError" class="error">{{ inspectError }}</p>
     </div>
 
+    <!-- 批量模式 -->
     <div v-else class="field-group">
       <label>批量链接（每行一条）</label>
       <textarea
@@ -80,6 +89,7 @@ function updateValue(eventName, event) {
       <p class="hint">当前识别 {{ parsedBatchUrls.length }} 条链接</p>
     </div>
 
+    <!-- 格式选择（作用于下载任务提交） -->
     <div class="field-group">
       <label>目标格式（可选）</label>
       <select :value="selectedFormatId" @change="updateValue('update:selectedFormatId', $event)">
@@ -90,6 +100,7 @@ function updateValue(eventName, event) {
       </select>
     </div>
 
+    <!-- 下载提交按钮 -->
     <div class="submit-row">
       <button
         v-if="mode === 'single'"
@@ -110,6 +121,7 @@ function updateValue(eventName, event) {
 </template>
 
 <style scoped>
+/* 基础卡片容器 */
 .panel {
   border: 1px solid #d7e2f3;
   background: #fff;
@@ -125,6 +137,7 @@ function updateValue(eventName, event) {
   min-height: 0;
 }
 
+/* 头部：标题 + 模式切换 */
 .panel-head {
   display: flex;
   align-items: center;
@@ -138,6 +151,7 @@ h2 {
   color: #162544;
 }
 
+/* 模式切换按钮组 */
 .mode-switch {
   border: 1px solid #d2dcee;
   border-radius: 999px;
@@ -162,6 +176,7 @@ h2 {
   color: #fff;
 }
 
+/* 视频封面卡片：封面完整显示，不裁切 */
 .hero-video {
   border: 1px solid #dbe4f4;
   border-radius: 12px;
@@ -207,6 +222,7 @@ h2 {
   font-size: 12px;
 }
 
+/* 表单区域 */
 .field-group {
   display: grid;
   gap: 6px;
@@ -241,6 +257,7 @@ select:focus {
   gap: 6px;
 }
 
+/* 统一主操作按钮 */
 .action {
   border: 0;
   border-radius: 10px;

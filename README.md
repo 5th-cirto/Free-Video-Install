@@ -19,7 +19,7 @@
 ## 技术栈
 
 - 后端：`FastAPI`、`yt-dlp`、`httpx`
-- 前端：`Vue 3`、`Vite`
+- 前端：`Vue 3`、`Vite`、`axios`
 - 任务执行：`ThreadPoolExecutor`（轻量内存任务管理）
 
 ## 项目结构
@@ -88,6 +88,7 @@ npm run dev
 - `POST /api/video/open-path`
 - `GET /api/video/thumbnail`
 - `POST /api/ai-summary/stream`（SSE）
+- `POST /api/video/subtitles/download`（字幕导出：`txt/srt/vtt`）
 
 ### AI 总结结果字段（`result` 事件）
 
@@ -129,6 +130,7 @@ npm run dev
 - `docs/需求分析文档.md`
 - `docs/方案设计文档.md`
 - `docs/项目总结文档.md`
+- `docs/AI总结接口说明.md`
 
 ## 前端 UI V2 说明（2026-03）
 
@@ -137,6 +139,13 @@ npm run dev
 - 移动端顺序为“下载工作台 -> AI 总结结果”，保证操作链路优先。
 - 任务中心改为次级折叠面板，保留任务统计、进度、错误、打开文件位置。
 - 去除“格式预览”块，避免首屏拥挤；视频封面改为完整展示（不裁切）。
+- 前端请求统一迁移至 `axios`，并保持 AI SSE 增量事件解析。
+
+## 前端请求说明
+
+- 常规 JSON 接口：统一通过 `axios` 实例调用（集中 `baseURL` 与错误处理）。
+- AI 总结接口：使用 `axios` + `onDownloadProgress` 解析 SSE 增量文本流。
+- 字幕导出接口：使用 `axios` 的 `responseType: blob` 下载文件。
 
 ## 后续规划
 

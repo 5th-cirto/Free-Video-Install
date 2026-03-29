@@ -1,4 +1,7 @@
 <script setup>
+// 任务中心次级面板：
+// - 默认折叠，按需展开任务明细
+// - 展示任务状态与进度，打开本地文件动作由父组件执行
 defineProps({
   expanded: { type: Boolean, default: false },
   runningCount: { type: Number, default: 0 },
@@ -7,10 +10,13 @@ defineProps({
   tasks: { type: Array, default: () => [] },
 })
 
+// toggle: 展开/收起任务面板
+// openLocalPath: 打开指定文件路径
 const emit = defineEmits(['toggle', 'openLocalPath'])
 </script>
 
 <template>
+  <!-- 任务中心：摘要栏 + 可折叠详情 -->
   <section class="task-shell">
     <button class="task-summary" @click="emit('toggle')">
       <strong>任务中心</strong>
@@ -24,6 +30,7 @@ const emit = defineEmits(['toggle', 'openLocalPath'])
 
     <div v-if="expanded" class="task-panel">
       <div v-if="tasks.length === 0" class="empty">暂无下载任务</div>
+      <!-- 任务列表 -->
       <div v-else class="task-list">
         <article v-for="task in tasks" :key="task.task_id" class="task-item">
           <div class="task-top">
@@ -50,6 +57,7 @@ const emit = defineEmits(['toggle', 'openLocalPath'])
 </template>
 
 <style scoped>
+/* 外层卡片 */
 .task-shell {
   border: 1px solid #d7e2f3;
   border-radius: 16px;
@@ -57,6 +65,7 @@ const emit = defineEmits(['toggle', 'openLocalPath'])
   box-shadow: 0 10px 28px rgba(21, 45, 90, 0.07);
 }
 
+/* 折叠摘要栏 */
 .task-summary {
   width: 100%;
   border: 0;
@@ -101,6 +110,7 @@ const emit = defineEmits(['toggle', 'openLocalPath'])
   padding: 10px 12px 12px;
 }
 
+/* 任务列表：固定最大高度，内部滚动 */
 .task-list {
   max-height: 230px;
   overflow: auto;

@@ -10,6 +10,7 @@
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
+    "axios": "^1.14.0",
     "canvg": "^4.0.3",
     "mermaid": "^11.13.0",
     "pinia": "^3.0.4",

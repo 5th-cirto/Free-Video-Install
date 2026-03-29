@@ -1,18 +1,39 @@
-# AI 总结接口说明
+# AI 总结接口说明（基于当前后端代码）
 
-本文档描述《万能视频下载站》当前 AI 总结能力的接口约定与联调方法。
+本文档依据当前实现更新，参考：
 
-## 1. 接口概览
+- `api/routers/ai_summary.py`
+- `api/routers/video.py`
+- `api/schemas.py`
+- `api/services/ai_summary.py`
+- `api/services/subtitle_extractor.py`
 
-- 协议：HTTP + SSE（Server-Sent Events）
-- 路径：`POST /api/ai-summary/stream`
-- 返回类型：`text/event-stream`
-- 功能：输入视频链接，流式返回总结过程与最终结构化结果
-- 相关接口：`POST /api/video/subtitles/download`（字幕文件下载，`txt/srt/vtt`）
+## 1. 接口清单
 
-## 2. 请求参数
+### 1.1 AI 总结 SSE
 
-请求体（JSON）：
+- 方法：`POST`
+- 路径：`/api/ai-summary/stream`
+- Content-Type（请求）：`application/json`
+- Content-Type（响应）：`text/event-stream`
+- 说明：输入视频链接，按事件流返回总结过程与最终结构化结果
+
+### 1.2 字幕文件下载（配套接口）
+
+- 方法：`POST`
+- 路径：`/api/video/subtitles/download`
+- Content-Type（请求）：`application/json`
+- Content-Type（响应）：
+  - `txt` -> `text/plain; charset=utf-8`
+  - `srt` -> `application/x-subrip; charset=utf-8`
+  - `vtt` -> `text/vtt; charset=utf-8`
+- 说明：按格式导出字幕文件，响应头包含 `Content-Disposition`
+
+## 2. 请求参数定义
+
+## 2.1 `POST /api/ai-summary/stream`
+
+请求体：
 
 ```json
 {
@@ -21,29 +42,47 @@
 }
 ```
 
-字段说明：
+字段：
 
-- `url`（必填，string）：视频链接
+- `url`（必填，string，最短 3 字符）：视频链接
 - `language`（可选，string）：字幕语言偏好（如 `zh-CN`、`zh`、`en`）
+
+## 2.2 `POST /api/video/subtitles/download`
+
+请求体：
+
+```json
+{
+  "url": "https://www.bilibili.com/video/BV1HfXKBQEMg/",
+  "language": "zh-CN",
+  "format": "srt"
+}
+```
+
+字段：
+
+- `url`（必填，string，最短 3 字符）：视频链接
+- `language`（可选，string）：字幕语言偏好
+- `format`（可选，enum）：`txt | srt | vtt`，默认 `srt`
 
 ## 3. SSE 事件协议
 
-接口会按阶段持续推送事件，前端应按 `event` 类型处理：
+服务端通过以下事件类型输出：
 
-- `stage`：阶段状态
-- `delta`：模型增量文本（流式 token 片段）
-- `partial_result`：结构化中间结果（用于前端实时渲染）
-- `result`：最终结构化结果
-- `error`：可读错误信息
-- `done`：结束标记
+- `stage`
+- `delta`
+- `partial_result`
+- `result`
+- `error`
+- `done`
 
-### 3.1 stage 事件
+## 3.1 `stage`（阶段状态）
 
-常见阶段值：
+当前代码中的阶段值：
 
 - `started`：请求已接收
-- `subtitle_ready`：字幕提取完成
-- `summarizing`：模型生成中
+- `subtitle_ready`：字幕提取成功
+- `summarizing`：大模型总结中
 
 示例：
 
@@ -52,20 +91,23 @@ event: stage
 data: {"stage":"subtitle_ready","language":"ai-zh","source":"bilibili_player_api","chars":2910,"segments":126}
 ```
 
-### 3.2 delta 事件
+字段补充：
 
-用于显示流式生成过程（可选展示）：
+- `language`：实际提取字幕语言
+- `source`：字幕来源
+- `chars`：字幕文本字符数
+- `segments`：字幕分段数
+
+## 3.2 `delta`（增量文本）
 
 ```text
 event: delta
 data: {"text":"..."}
 ```
 
-### 3.3 result 事件（核心）
+说明：模型输出片段，适合打字机效果或调试原始流。
 
-### 3.3 partial_result 事件（新增）
-
-用于在模型尚未完成时推送可解析的结构化中间态，前端可据此流式刷新“总结/核心要点”等内容：
+## 3.3 `partial_result`（结构化中间态）
 
 ```text
 event: partial_result
@@ -74,12 +116,11 @@ data: {"summary":"...","outline":["..."],"key_points":["..."],"mindmap_mermaid":
 
 说明：
 
-- 该事件为“尽力解析”的中间态，字段可能阶段性为空或不完整
-- 以最终 `result` 事件为准
+- 基于当前累计文本做尽力解析，字段可能暂时为空或不完整
+- 前端可据此流式刷新摘要/要点
+- 最终以 `result` 事件为准
 
-### 3.4 result 事件（核心）
-
-最终结构化输出：
+## 3.4 `result`（最终结构化结果）
 
 ```json
 {
@@ -99,49 +140,70 @@ data: {"summary":"...","outline":["..."],"key_points":["..."],"mindmap_mermaid":
 字段说明：
 
 - `summary`：摘要
-- `outline`：大纲列表
-- `key_points`：核心知识点列表
-- `mindmap_mermaid`：Mermaid 思维导图源码
-- `subtitle_text`：字幕全文
-- `subtitle_segments`：时间戳字幕分段（秒）
+- `outline`：章节/主题大纲
+- `key_points`：核心要点
+- `mindmap_mermaid`：Mermaid 导图源码
+- `subtitle_text`：完整字幕文本
+- `subtitle_segments`：字幕分段数组（秒级时间）
 - `language`：实际字幕语言
 - `subtitle_source`：字幕来源（如 `manual_subtitle`、`automatic_caption`、`bilibili_player_api`）
 
-### 3.5 error 事件
+## 3.5 `error`（错误信息）
 
 ```text
 event: error
 data: {"message":"Current video has no available platform subtitles."}
 ```
 
-### 3.6 done 事件
+说明：统一输出可读错误文本；随后通常会有 `done` 事件。
+
+## 3.6 `done`（结束标记）
+
+成功：
 
 ```text
 event: done
 data: {"ok":true}
 ```
 
-或失败：
+失败：
 
 ```text
 event: done
 data: {"ok":false}
 ```
 
-## 4. 关键实现策略
+## 4. 字幕下载接口返回说明
+
+## 4.1 成功
+
+- 返回文件二进制流
+- `Content-Disposition: attachment; filename="subtitle_xxx.srt"`
+
+## 4.2 失败（HTTP 400/422）
+
+常见原因：
+
+- 字幕提取失败（`Subtitle extraction failed: ...`）
+- 字幕导出失败（`Subtitle export failed: ...`）
+- 字幕内容为空（`Subtitle content is empty.`）
+- 参数格式错误（例如 `format` 不在 `txt/srt/vtt`）
+
+## 5. 关键实现策略
 
 - 字幕提取：
-  - 主路径：`yt-dlp` 的 `subtitles/automatic_captions`
-  - B 站兜底：`view + player/wbi/v2` 字幕接口
+  - 主路径：`yt-dlp` 的 `subtitles` / `automatic_captions`
+  - B 站兜底：`x/web-interface/view` + `x/player/wbi/v2`
 - 模型调用：
-  - DeepSeek 官方 API（流式）
-  - 默认模型：`deepseek-chat`
-- 思维导图：
-  - 模型优先返回 `mindmap_mermaid`
-  - 若语法异常，前端可使用大纲自动兜底生成
-  - 当前前端支持全屏预览与 SVG 下载
+  - DeepSeek 流式输出
+  - 默认模型 `deepseek-chat`
+- 结构化中间态：
+  - 服务端在流式输出中对累计文本进行“尽力 JSON 解析”，生成 `partial_result`
+- 导图策略：
+  - 服务端返回 `mindmap_mermaid`
+  - 前端可在语法异常时用 `outline/key_points` 兜底重建
 
-## 5. 环境变量
+## 6. 环境变量
 
 必需：
 
@@ -152,27 +214,27 @@ data: {"ok":false}
 - `DEEPSEEK_BASE_URL=https://api.deepseek.com`
 - `DEEPSEEK_MODEL=deepseek-chat`
 - `DEEPSEEK_TIMEOUT_SECONDS=120`
-- `DEEPSEEK_PROXY_URL=`（有代理需求时填写）
+- `DEEPSEEK_PROXY_URL=`（需要代理时填写）
 
 字幕相关（按需）：
 
 - `YTDLP_COOKIEFILE=`（cookie.txt 绝对路径）
 - `YTDLP_COOKIES_FROM_BROWSER=`（如 `chrome`）
 
-## 6. 联调建议
+## 7. 联调建议
 
-1. 先确认后端健康：`GET /api/health`
-2. 再发起 `POST /api/ai-summary/stream`
-3. 前端按事件流处理并在 `done` 时收敛状态
-4. 若出现 `error`：
-   - 先检查视频是否有平台字幕
-   - 再检查 cookie 配置与网络代理
-   - 最后检查 DeepSeek Key/连通性
+1. `GET /api/health` 检查后端服务
+2. 用 `POST /api/ai-summary/stream` 验证 SSE 事件完整性（至少收到 `stage` + `done`）
+3. 再测 `POST /api/video/subtitles/download` 的 `txt/srt/vtt` 三种格式
+4. 出错排查顺序：
+   - 视频是否存在平台字幕
+   - cookie/登录态是否可用
+   - 网络代理与 DeepSeek 连通性
 
-## 7. 兼容与限制
+## 8. 已知限制
 
-- 当前不启用 Whisper，本能力仅依赖平台字幕
-- 部分受限视频可能需要登录态 cookie
-- 任务状态仅内存，不做持久化记录
-- 思维导图高清 PNG 在当前版本未开放，建议优先使用 SVG 导出
+- 当前不启用 Whisper，依赖平台字幕可用性
+- 受限视频可能需要 cookie
+- 任务状态仅内存存储，不持久化
+- 思维导图高清 PNG 未开放，建议使用 SVG 导出
 

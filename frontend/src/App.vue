@@ -1,12 +1,22 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import axios from 'axios'
 import DownloadPanel from './components/DownloadPanel.vue'
 import StudioHeader from './components/StudioHeader.vue'
 import SummaryPanel from './components/SummaryPanel.vue'
 import TaskCenterPanel from './components/TaskCenterPanel.vue'
 
+// 后端 API 地址：支持通过 VITE_API_BASE 覆盖，默认本地 8000。
 const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+// Axios 实例：统一 baseURL 与请求头，便于后续集中扩展（如拦截器）。
+const apiClient = axios.create({
+  baseURL: apiBase,
+  headers: { 'Content-Type': 'application/json' },
+})
 
+// =============================
+// 下载工作台状态
+// =============================
 const mode = ref('single')
 const singleUrl = ref('')
 const batchInput = ref('')
@@ -17,6 +27,10 @@ const selectedFormatId = ref('')
 const actionError = ref('')
 const actionLoading = ref(false)
 const downloadsDir = ref('')
+
+// =============================
+// AI 总结状态
+// =============================
 const aiLanguage = ref('')
 const aiLoading = ref(false)
 const aiError = ref('')
@@ -36,9 +50,13 @@ const mindmapRenderHint = ref('')
 const mindmapFullscreen = ref(false)
 let mermaidInstance = null
 
+// =============================
+// 任务中心状态
+// =============================
 const tasks = ref([])
 let pollTimer = null
 
+// 批量输入拆分为 URL 数组，供批量下载接口直接使用。
 const parsedBatchUrls = computed(() =>
   batchInput.value
     .split('\n')
@@ -51,7 +69,11 @@ const failedCount = computed(() => tasks.value.filter((task) => task.status === 
 const runningCount = computed(() =>
   tasks.value.filter((task) => task.status === 'running' || task.status === 'queued').length,
 )
+
+// AI 展示优先使用最终结果；流式中间态作为回退。
 const aiDisplayResult = computed(() => aiResult.value || aiPartialResult.value)
+
+// 从 partial_result 中读取摘要；若中间态缺失，再尝试从 delta 拼接文本中提取。
 const aiStreamingSummary = computed(() => {
   const partial = String(aiDisplayResult.value?.summary || '').trim()
   if (partial) return partial
@@ -61,6 +83,8 @@ const aiStreamingSummary = computed(() => {
   if (!match?.[1]) return ''
   return match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').trim()
 })
+
+// 核心要点同理：优先结构化中间态，回退到 raw 文本解析。
 const aiStreamingKeyPoints = computed(() => {
   const fromPartial = Array.isArray(aiDisplayResult.value?.key_points) ? aiDisplayResult.value.key_points : []
   if (fromPartial.length) return fromPartial
@@ -78,6 +102,8 @@ const aiStreamingKeyPoints = computed(() => {
   }
   return points
 })
+
+// 判断 AI 区是否有可展示内容，用于决定显示“结果区”还是“空态文案”。
 const hasAiContent = computed(
   () =>
     Boolean(aiRaw.value) ||
@@ -90,6 +116,7 @@ const hasAiContent = computed(
 const aiViewTab = ref('summary')
 const taskCenterExpanded = ref(false)
 
+// 将秒数格式化为 mm:ss / hh:mm:ss。
 function formatDuration(seconds) {
   if (!seconds || Number.isNaN(seconds)) return '--:--'
   const total = Math.floor(seconds)
@@ -100,6 +127,7 @@ function formatDuration(seconds) {
   return `${minutes}:${String(secs).padStart(2, '0')}`
 }
 
+// 字幕时间格式化（用于页面展示）。
 function formatTimestamp(seconds) {
   const value = Number(seconds || 0)
   if (!Number.isFinite(value) || value < 0) return '00:00'
@@ -111,37 +139,44 @@ function formatTimestamp(seconds) {
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 }
 
+// 封面统一走后端代理，避免第三方跨域或防盗链导致的加载失败。
 function thumbnailUrl(rawUrl) {
   if (!rawUrl) return ''
   return `${apiBase}/api/video/thumbnail?url=${encodeURIComponent(rawUrl)}`
 }
 
-async function callApi(path, payload = null, method = 'GET') {
-  const options = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
+// 从 axios 异常中提取可读错误信息，优先后端 detail 字段。
+function getAxiosMessage(error, fallback = '请求失败') {
+  if (!axios.isAxiosError(error)) {
+    return String(error?.message || fallback)
   }
-  if (payload) options.body = JSON.stringify(payload)
-
-  let response
-  try {
-    response = await fetch(`${apiBase}${path}`, options)
-  } catch (error) {
-    const text = String(error?.message || '')
-    if (text.includes('Failed to fetch')) {
-      throw new Error(`无法连接后端接口(${apiBase})。请确认后端已启动，并允许当前前端端口跨域访问。`)
-    }
-    throw error
-  }
-  const body = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    throw new Error(body?.detail || body?.message || `请求失败(${response.status})`)
-  }
-  return body
+  const detail = error.response?.data?.detail
+  const message = error.response?.data?.message
+  if (typeof detail === 'string' && detail.trim()) return detail
+  if (typeof message === 'string' && message.trim()) return message
+  if (typeof error.message === 'string' && error.message.trim()) return error.message
+  return fallback
 }
 
+// 通用 JSON API 调用封装（axios 版本）。
+async function callApi(path, payload = null, method = 'GET') {
+  try {
+    const response = await apiClient.request({
+      url: path,
+      method,
+      data: payload || undefined,
+    })
+    return response.data
+  } catch (error) {
+    const text = getAxiosMessage(error)
+    if (text.includes('Network Error') || text.includes('ERR_NETWORK')) {
+      throw new Error(`无法连接后端接口(${apiBase})。请确认后端已启动，并允许当前前端端口跨域访问。`)
+    }
+    throw new Error(text)
+  }
+}
+
+// 解析视频信息，并在成功后自动触发 AI 总结（单条模式主流程）。
 async function inspectVideo() {
   inspectError.value = ''
   actionError.value = ''
@@ -164,6 +199,7 @@ async function inspectVideo() {
   }
 }
 
+// 创建单条下载任务。
 async function createSingleDownload() {
   actionError.value = ''
   actionLoading.value = true
@@ -181,6 +217,7 @@ async function createSingleDownload() {
   }
 }
 
+// 创建批量下载任务。
 async function createBatchDownload() {
   actionError.value = ''
   actionLoading.value = true
@@ -202,6 +239,7 @@ async function createBatchDownload() {
   }
 }
 
+// 拉取任务列表（用于任务中心 + 顶部统计）。
 async function loadTasks() {
   try {
     const resp = await callApi('/api/video/tasks')
@@ -211,6 +249,7 @@ async function loadTasks() {
   }
 }
 
+// 拉取运行时配置（主要是默认下载目录）。
 async function loadRuntimeConfig() {
   try {
     const resp = await callApi('/api/video/config')
@@ -220,6 +259,7 @@ async function loadRuntimeConfig() {
   }
 }
 
+// 打开本地路径（由后端执行系统命令）。
 async function openLocalPath(path) {
   if (!path) return
   try {
@@ -229,6 +269,7 @@ async function openLocalPath(path) {
   }
 }
 
+// 开始一次新的 AI 总结前，清空旧状态，避免页面残留。
 function resetAiState() {
   aiError.value = ''
   aiStage.value = ''
@@ -246,6 +287,7 @@ function resetAiState() {
   aiViewTab.value = 'summary'
 }
 
+// 解析 SSE 文本包，提取 event 和 data。
 function parseSseMessage(rawMessage) {
   const lines = rawMessage.split('\n')
   let event = 'message'
@@ -271,6 +313,10 @@ function parseSseMessage(rawMessage) {
   return { event, data }
 }
 
+// AI SSE 主流程：
+// 1) 发起流式请求
+// 2) 逐包解析 stage/delta/partial_result/result/error/done
+// 3) 驱动右侧总结区实时渲染
 async function startAiSummaryStream(urlOverride = '') {
   resetAiState()
   const targetUrl = (urlOverride || singleUrl.value || aiCurrentUrl.value).trim()
@@ -281,40 +327,17 @@ async function startAiSummaryStream(urlOverride = '') {
   aiCurrentUrl.value = targetUrl
   aiLoading.value = true
   try {
-    let response
-    try {
-      response = await fetch(`${apiBase}/api/ai-summary/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: targetUrl,
-          language: aiLanguage.value.trim() || null,
-        }),
-      })
-    } catch (error) {
-      const text = String(error?.message || '')
-      if (text.includes('Failed to fetch')) {
-        throw new Error(`AI总结请求无法连接后端(${apiBase})，请检查后端服务与跨域端口配置。`)
-      }
-      throw error
-    }
-    if (!response.ok || !response.body) {
-      throw new Error(`SSE请求失败(${response.status})`)
-    }
-
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
     let buffer = ''
-
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
+    let processedLength = 0
+    const flushSseBuffer = () => {
       let splitIndex = buffer.indexOf('\n\n')
       while (splitIndex !== -1) {
         const packet = buffer.slice(0, splitIndex)
         buffer = buffer.slice(splitIndex + 2)
+        if (!packet.trim()) {
+          splitIndex = buffer.indexOf('\n\n')
+          continue
+        }
         const parsed = parseSseMessage(packet)
         if (parsed.event === 'stage') {
           aiStage.value = parsed.data?.stage || ''
@@ -338,13 +361,41 @@ async function startAiSummaryStream(urlOverride = '') {
         splitIndex = buffer.indexOf('\n\n')
       }
     }
+
+    await apiClient.post(
+      '/api/ai-summary/stream',
+      {
+        url: targetUrl,
+        language: aiLanguage.value.trim() || null,
+      },
+      {
+        responseType: 'text',
+        onDownloadProgress: (event) => {
+          // axios 在浏览器内通过 XHR 提供 responseText，可用来模拟增量 SSE 解析。
+          const responseText = event.event?.target?.responseText || event.currentTarget?.responseText || ''
+          if (typeof responseText !== 'string') return
+          if (responseText.length <= processedLength) return
+          buffer += responseText.slice(processedLength)
+          processedLength = responseText.length
+          flushSseBuffer()
+        },
+      },
+    )
+    // 兜底：请求完成后再冲洗一次缓冲区，避免尾包漏解析。
+    flushSseBuffer()
   } catch (error) {
-    aiError.value = error.message || 'SSE连接失败'
+    const text = getAxiosMessage(error, 'SSE连接失败')
+    if (text.includes('Network Error') || text.includes('ERR_NETWORK')) {
+      aiError.value = `AI总结请求无法连接后端(${apiBase})，请检查后端服务与跨域端口配置。`
+    } else {
+      aiError.value = text
+    }
   } finally {
     aiLoading.value = false
   }
 }
 
+// 延迟加载 Mermaid，首次使用时初始化，减少首屏开销。
 async function ensureMermaid() {
   if (mermaidInstance) return mermaidInstance
   const mod = await import('mermaid')
@@ -357,6 +408,7 @@ async function ensureMermaid() {
   return mermaidInstance
 }
 
+// 根据 mindmap_mermaid 渲染 SVG；失败时尝试用大纲重建导图。
 async function renderMindmapSvg(source) {
   if (!source) {
     mindmapSvg.value = ''
@@ -392,6 +444,7 @@ async function renderMindmapSvg(source) {
   }
 }
 
+// 当模型返回导图语法不稳定时，使用大纲和要点兜底构造简版导图。
 function buildFallbackMindmapSource(result) {
   const roots = [...(result?.outline || []), ...(result?.key_points || [])].filter(Boolean).slice(0, 12)
   if (!roots.length) return ''
@@ -403,6 +456,7 @@ function buildFallbackMindmapSource(result) {
   return lines.join('\n')
 }
 
+// 监听导图源码变化并自动重绘。
 watch(
   () => aiDisplayResult.value?.mindmap_mermaid,
   (nextValue) => {
@@ -410,12 +464,14 @@ watch(
   },
 )
 
+// 有任务运行时自动展开任务中心，降低用户错过进度变化的概率。
 watch(runningCount, (count) => {
   if (count > 0) {
     taskCenterExpanded.value = true
   }
 })
 
+// 导图全屏弹窗开关。
 function openMindmapFullscreen() {
   if (!mindmapSvg.value) return
   mindmapFullscreen.value = true
@@ -425,12 +481,14 @@ function closeMindmapFullscreen() {
   mindmapFullscreen.value = false
 }
 
+// 确保导出 SVG 含命名空间，兼容更多查看器。
 function getMindmapSvgText() {
   if (!mindmapSvg.value) throw new Error('当前无可导出的思维导图')
   if (mindmapSvg.value.includes('xmlns=')) return mindmapSvg.value
   return mindmapSvg.value.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
 }
 
+// 通用 Blob 下载函数（导图和字幕下载都复用）。
 function triggerBlobDownload(blob, filename) {
   const objectUrl = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -442,6 +500,7 @@ function triggerBlobDownload(blob, filename) {
   URL.revokeObjectURL(objectUrl)
 }
 
+// 导出当前导图为 SVG 文件。
 function downloadMindmapSvg() {
   try {
     const svgText = getMindmapSvgText()
@@ -452,11 +511,13 @@ function downloadMindmapSvg() {
   }
 }
 
+// 从响应头解析文件名。
 function extractFilename(disposition, fallback) {
   const match = /filename="?([^"]+)"?/i.exec(disposition || '')
   return match?.[1] || fallback
 }
 
+// 字幕时间格式化（SRT 与 VTT 分隔符不同）。
 function formatSubtitleTime(seconds, forSrt = true) {
   const value = Math.max(0, Number(seconds || 0))
   const totalMs = Math.round(value * 1000)
@@ -468,6 +529,7 @@ function formatSubtitleTime(seconds, forSrt = true) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}${sep}${String(millis).padStart(3, '0')}`
 }
 
+// 基于 aiResult 组装本地字幕内容（后端不可用时兜底下载）。
 function buildLocalSubtitle(format) {
   const text = String(aiResult.value?.subtitle_text || '').trim()
   const segments = Array.isArray(aiResult.value?.subtitle_segments) ? aiResult.value.subtitle_segments : []
@@ -498,6 +560,7 @@ function buildLocalSubtitle(format) {
   return blocks.join('\n\n').trim()
 }
 
+// 当后端返回 404 时，使用前端已有字幕结果导出。
 function downloadSubtitleFromLocalResult(format) {
   const content = buildLocalSubtitle(format)
   if (!content) {
@@ -507,6 +570,7 @@ function downloadSubtitleFromLocalResult(format) {
   triggerBlobDownload(blob, `subtitle.${format}`)
 }
 
+// 优先调用后端字幕下载接口；接口不可用时回退本地导出。
 async function downloadSubtitleFile(format) {
   const targetUrl = aiCurrentUrl.value.trim() || singleUrl.value.trim()
   if (!targetUrl) {
@@ -515,31 +579,29 @@ async function downloadSubtitleFile(format) {
   }
   aiError.value = ''
   try {
-    const response = await fetch(`${apiBase}/api/video/subtitles/download`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const response = await apiClient.post(
+      '/api/video/subtitles/download',
+      {
         url: targetUrl,
         language: aiLanguage.value.trim() || null,
         format,
-      }),
-    })
-    if (!response.ok) {
-      if (response.status === 404) {
-        downloadSubtitleFromLocalResult(format)
-        return
-      }
-      const body = await response.json().catch(() => ({}))
-      throw new Error(body?.detail || `字幕下载失败(${response.status})`)
-    }
-    const blob = await response.blob()
-    const disposition = response.headers.get('content-disposition') || ''
-    triggerBlobDownload(blob, extractFilename(disposition, `subtitle.${format}`))
+      },
+      { responseType: 'blob' },
+    )
+    const disposition = response.headers?.['content-disposition'] || ''
+    triggerBlobDownload(response.data, extractFilename(disposition, `subtitle.${format}`))
   } catch (error) {
-    aiError.value = error.message || '字幕下载失败'
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      downloadSubtitleFromLocalResult(format)
+      return
+    }
+    aiError.value = getAxiosMessage(error, '字幕下载失败')
   }
 }
 
+// 页面生命周期：
+// - mounted: 加载配置与任务，并启动轮询
+// - unmounted: 释放轮询
 onMounted(async () => {
   await loadRuntimeConfig()
   await loadTasks()
@@ -552,10 +614,13 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <!-- 页面壳层：顶部状态栏 + 双栏工作区 + 可折叠任务中心 -->
   <div class="app-shell">
     <StudioHeader :running-count="runningCount" :success-count="successCount" :failed-count="failedCount" />
 
+    <!-- 双栏工作区：左下载、右总结（移动端改为单列） -->
     <section class="studio-layout">
+      <!-- 右侧总结面板（桌面端显示在右侧） -->
       <SummaryPanel
         class="right-column"
         :ai-stage="aiStage"
@@ -578,6 +643,7 @@ onUnmounted(() => {
         @download-subtitle-file="downloadSubtitleFile"
       />
 
+      <!-- 左侧下载面板 -->
       <DownloadPanel
         class="left-column"
         :mode="mode"
@@ -603,6 +669,7 @@ onUnmounted(() => {
       />
     </section>
 
+    <!-- 次级任务中心：默认折叠 -->
     <TaskCenterPanel
       :expanded="taskCenterExpanded"
       :running-count="runningCount"
@@ -613,6 +680,7 @@ onUnmounted(() => {
       @open-local-path="openLocalPath"
     />
 
+    <!-- 导图全屏弹窗 -->
     <div v-if="mindmapFullscreen" class="mindmap-modal" @click.self="closeMindmapFullscreen">
       <div class="mindmap-modal-content">
         <div class="mindmap-modal-head">
@@ -628,6 +696,7 @@ onUnmounted(() => {
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@500;700;800&family=Manrope:wght@400;500;600;700&display=swap');
 
+/* 全局页面背景与基础字体 */
 :global(body) {
   margin: 0;
   font-family: 'Manrope', sans-serif;
@@ -638,6 +707,7 @@ onUnmounted(() => {
     #f2f6fc;
 }
 
+/* 页面根容器 */
 .app-shell {
   height: 100vh;
   max-width: 1440px;
@@ -649,6 +719,7 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
+/* 桌面端双栏布局 */
 .studio-layout {
   display: flex;
   gap: 10px;
@@ -657,6 +728,7 @@ onUnmounted(() => {
   align-items: stretch;
 }
 
+/* 左栏（下载工作台） */
 .left-column {
   order: 1;
   flex: 0 0 40%;
@@ -665,6 +737,7 @@ onUnmounted(() => {
   overflow: auto;
 }
 
+/* 右栏（AI 总结） */
 .right-column {
   order: 2;
   flex: 1 1 60%;
@@ -673,6 +746,7 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
+/* 导图全屏弹窗 */
 .mindmap-modal {
   position: fixed;
   inset: 0;
@@ -724,6 +798,7 @@ onUnmounted(() => {
   padding: 14px;
 }
 
+/* 平板与小屏：改为单列，并保持下载工作台在上 */
 @media (max-width: 1200px) {
   .studio-layout {
     display: flex;
@@ -755,6 +830,7 @@ onUnmounted(() => {
   }
 }
 
+/* 手机端进一步压缩边距 */
 @media (max-width: 960px) {
   .app-shell {
     padding: 10px;
