@@ -1,6 +1,6 @@
 # 万能视频下载站（MVP）
 
-一个基于 `FastAPI + yt-dlp + Vue3` 的本地可运行视频下载工具，支持单条/批量下载、格式选择、任务进度查看、封面预览与本地落盘。
+一个基于 `FastAPI + yt-dlp + Vue3` 的本地可运行视频下载工具，支持单条/批量下载、格式选择、任务进度查看、封面预览、本地落盘，以及 AI 视频总结（SSE 流式）。
 
 ## 功能特性
 
@@ -10,6 +10,8 @@
 - 分离流自动处理（仅视频会自动补音频并合并）
 - 封面代理加载（提升显示稳定性）
 - 一键打开本地文件位置
+- AI 视频总结（SSE 流式输出：`summary / outline / key_points`）
+- 平台字幕优先提取（含 B 站字幕 API 兜底，不启用 Whisper）
 
 ## 技术栈
 
@@ -23,8 +25,9 @@
 free-video-installer/
 ├─ api/                       # FastAPI 后端
 │  ├─ main.py                 # 应用入口
-│  ├─ routers/video.py        # 视频相关接口
-│  └─ services/               # 下载与任务服务
+│  ├─ routers/video.py        # 下载相关接口
+│  ├─ routers/ai_summary.py   # AI 总结 SSE 接口
+│  └─ services/               # 下载/字幕/总结服务
 ├─ frontend/                  # Vue 前端
 │  └─ src/App.vue             # 主页面
 ├─ docs/                      # 需求/方案/总结文档
@@ -79,6 +82,7 @@ npm run dev
 - `GET /api/video/config`
 - `POST /api/video/open-path`
 - `GET /api/video/thumbnail`
+- `POST /api/ai-summary/stream`（SSE）
 
 ## 配置说明
 
@@ -89,6 +93,13 @@ npm run dev
 - `DOWNLOADS_DIR`
 - `MAX_PARALLEL_DOWNLOADS`
 - `REQUEST_TIMEOUT_SECONDS`
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
+- `DEEPSEEK_TIMEOUT_SECONDS`
+- `DEEPSEEK_PROXY_URL`（可选，DeepSeek 显式代理）
+- `YTDLP_COOKIEFILE`（可选，平台登录态 cookie 文件）
+- `YTDLP_COOKIES_FROM_BROWSER`（可选，从浏览器读取 cookie）
 
 参考模板：`.env.example`
 
@@ -97,6 +108,7 @@ npm run dev
 - 任务状态仅存内存，重启后丢失
 - 暂无账号体系、支付、配额控制
 - 暂无任务持久化与监控告警
+- AI 总结依赖平台可用字幕；若平台未返回字幕则无法生成总结
 
 ## 文档
 

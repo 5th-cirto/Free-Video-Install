@@ -13,6 +13,13 @@ const selectedFormatId = ref('')
 const actionError = ref('')
 const actionLoading = ref(false)
 const downloadsDir = ref('')
+const aiUrl = ref('')
+const aiLanguage = ref('')
+const aiLoading = ref(false)
+const aiError = ref('')
+const aiStage = ref('')
+const aiRaw = ref('')
+const aiResult = ref(null)
 
 const tasks = ref([])
 let pollTimer = null
@@ -156,6 +163,90 @@ async function openLocalPath(path) {
     await callApi('/api/video/open-path?path=' + encodeURIComponent(path), null, 'POST')
   } catch (error) {
     actionError.value = error.message
+  }
+}
+
+function parseSseMessage(rawMessage) {
+  const lines = rawMessage.split('\n')
+  let event = 'message'
+  const dataLines = []
+  for (const line of lines) {
+    if (!line) continue
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+      continue
+    }
+    if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trim())
+    }
+  }
+  let data = {}
+  if (dataLines.length) {
+    try {
+      data = JSON.parse(dataLines.join('\n'))
+    } catch (_error) {
+      data = {}
+    }
+  }
+  return { event, data }
+}
+
+async function startAiSummaryStream() {
+  aiError.value = ''
+  aiStage.value = ''
+  aiRaw.value = ''
+  aiResult.value = null
+  if (!aiUrl.value.trim()) {
+    aiError.value = '请先输入用于总结的视频链接'
+    return
+  }
+  aiLoading.value = true
+  try {
+    const response = await fetch(`${apiBase}/api/ai-summary/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: aiUrl.value.trim(),
+        language: aiLanguage.value.trim() || null,
+      }),
+    })
+    if (!response.ok || !response.body) {
+      throw new Error(`SSE请求失败(${response.status})`)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      let splitIndex = buffer.indexOf('\n\n')
+      while (splitIndex !== -1) {
+        const packet = buffer.slice(0, splitIndex)
+        buffer = buffer.slice(splitIndex + 2)
+        const parsed = parseSseMessage(packet)
+        if (parsed.event === 'stage') {
+          aiStage.value = parsed.data?.stage || ''
+        } else if (parsed.event === 'delta') {
+          aiRaw.value += parsed.data?.text || ''
+        } else if (parsed.event === 'result') {
+          aiResult.value = parsed.data || null
+        } else if (parsed.event === 'error') {
+          aiError.value = parsed.data?.message || '总结失败'
+        } else if (parsed.event === 'done') {
+          aiStage.value = parsed.data?.ok ? 'done' : 'failed'
+          aiLoading.value = false
+        }
+        splitIndex = buffer.indexOf('\n\n')
+      }
+    }
+  } catch (error) {
+    aiError.value = error.message || 'SSE连接失败'
+  } finally {
+    aiLoading.value = false
   }
 }
 
@@ -328,6 +419,49 @@ onUnmounted(() => {
           <h3>Team</h3>
           <p>多人协作、权限控制、私有部署支持</p>
         </div>
+      </div>
+    </section>
+
+    <section class="panel ai-panel">
+      <div class="panel-head">
+        <h2>AI 视频总结（SSE 流式）</h2>
+      </div>
+      <div class="field-group">
+        <label>视频链接</label>
+        <input v-model="aiUrl" type="text" placeholder="输入需要总结的视频链接" />
+      </div>
+      <div class="field-group">
+        <label>字幕语言（可选）</label>
+        <input v-model="aiLanguage" type="text" placeholder="如 zh-CN / zh / en" />
+      </div>
+      <div class="submit-row">
+        <button class="action strong" :disabled="aiLoading" @click="startAiSummaryStream">
+          {{ aiLoading ? '总结生成中...' : '开始 AI 总结' }}
+        </button>
+        <p class="hint" v-if="aiStage">当前阶段：{{ aiStage }}</p>
+        <p class="error" v-if="aiError">{{ aiError }}</p>
+      </div>
+
+      <div class="formats" v-if="aiRaw || aiResult">
+        <h3>流式输出</h3>
+        <div class="raw-box" v-if="aiRaw">{{ aiRaw }}</div>
+
+        <template v-if="aiResult">
+          <h3>结构化结果</h3>
+          <p class="meta" v-if="aiResult.summary"><strong>摘要：</strong>{{ aiResult.summary }}</p>
+          <div class="list-box" v-if="aiResult.outline?.length">
+            <p class="meta"><strong>大纲：</strong></p>
+            <ul>
+              <li v-for="(item, idx) in aiResult.outline" :key="`outline-${idx}`">{{ item }}</li>
+            </ul>
+          </div>
+          <div class="list-box" v-if="aiResult.key_points?.length">
+            <p class="meta"><strong>核心要点：</strong></p>
+            <ul>
+              <li v-for="(item, idx) in aiResult.key_points" :key="`point-${idx}`">{{ item }}</li>
+            </ul>
+          </div>
+        </template>
       </div>
     </section>
   </div>
@@ -680,6 +814,10 @@ select:focus {
   margin-top: 16px;
 }
 
+.ai-panel {
+  margin-top: 16px;
+}
+
 .pricing h2 {
   font-size: 18px;
   margin: 0 0 12px;
@@ -713,6 +851,25 @@ select:focus {
   color: #9dafeb;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.raw-box {
+  white-space: pre-wrap;
+  background: rgba(13, 20, 43, 0.85);
+  border: 1px solid rgba(95, 128, 255, 0.2);
+  border-radius: 10px;
+  padding: 10px;
+  color: #e0e7ff;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.list-box ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #c6d3ff;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 @media (max-width: 1000px) {

@@ -10,6 +10,8 @@ frontend/dist/
 # Runtime outputs
 downloads/
 *.log
+.env
+cookies/
 
 # Large local assets
 ffmpeg.zip

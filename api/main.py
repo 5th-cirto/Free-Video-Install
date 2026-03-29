@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import settings
+from api.routers.ai_summary import router as ai_summary_router
 from api.routers.video import router as video_router
 
 app = FastAPI(
@@ -26,4 +27,5 @@ def health() -> dict[str, str]:
 
 
 app.include_router(video_router)
+app.include_router(ai_summary_router)
 
