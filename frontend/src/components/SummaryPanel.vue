@@ -6,6 +6,7 @@ defineProps({
   aiStage: { type: String, default: '' },
   aiLoading: { type: Boolean, default: false },
   aiError: { type: String, default: '' },
+  aiQuotaExceeded: { type: Boolean, default: false },
   aiViewTab: { type: String, default: 'summary' },
   hasAiContent: { type: Boolean, default: false },
   aiStreamingSummary: { type: String, default: '' },
@@ -25,6 +26,7 @@ const emit = defineEmits([
   'openMindmapFullscreen',
   'downloadMindmapSvg',
   'downloadSubtitleFile',
+  'upgradeVip',
 ])
 </script>
 
@@ -34,19 +36,28 @@ const emit = defineEmits([
     <div class="panel-head">
       <h2>AI 总结结果</h2>
       <div class="status-tags">
-        <span v-if="aiStage">阶段 {{ aiStage }}</span>
+        <!--<span v-if="aiStage">阶段 {{ aiStage }}</span>-->
         <span v-if="aiLoading">生成中</span>
       </div>
     </div>
 
-    <p v-if="aiError" class="error">{{ aiError }}</p>
+    <div v-if="aiError" class="error-row">
+      <el-alert :title="aiError" type="error" :closable="false" show-icon />
+      <el-button v-if="aiQuotaExceeded" class="upgrade-btn" type="warning" @click="emit('upgradeVip')">开通 VIP</el-button>
+    </div>
 
     <!-- 结果页签切换 -->
     <div class="result-tabs">
-      <button :class="{ active: aiViewTab === 'summary' }" @click="emit('update:aiViewTab', 'summary')">总结摘要</button>
-      <button :class="{ active: aiViewTab === 'outline' }" @click="emit('update:aiViewTab', 'outline')">章节总结</button>
-      <button :class="{ active: aiViewTab === 'mindmap' }" @click="emit('update:aiViewTab', 'mindmap')">思维导图</button>
-      <button :class="{ active: aiViewTab === 'subtitle' }" @click="emit('update:aiViewTab', 'subtitle')">字幕内容</button>
+      <el-segmented
+        :model-value="aiViewTab"
+        :options="[
+          { label: '总结摘要', value: 'summary' },
+          { label: '章节总结', value: 'outline' },
+          { label: '思维导图', value: 'mindmap' },
+          { label: '字幕内容', value: 'subtitle' },
+        ]"
+        @update:model-value="emit('update:aiViewTab', $event)"
+      />
     </div>
 
     <!-- 有内容时显示结果，无内容时显示占位提示 -->
@@ -79,8 +90,8 @@ const emit = defineEmits([
       <!-- 导图页签 -->
       <div v-if="aiViewTab === 'mindmap'" class="list-box">
         <div class="mindmap-actions">
-          <button class="open-btn" :disabled="!mindmapSvg" @click="emit('openMindmapFullscreen')">全屏预览</button>
-          <button class="open-btn" :disabled="!mindmapSvg" @click="emit('downloadMindmapSvg')">下载 SVG</button>
+          <el-button class="open-btn" :disabled="!mindmapSvg" @click="emit('openMindmapFullscreen')">全屏预览</el-button>
+          <el-button class="open-btn" :disabled="!mindmapSvg" @click="emit('downloadMindmapSvg')">下载 SVG</el-button>
         </div>
         <div v-if="mindmapSvg" class="mindmap-preview" v-html="mindmapSvg"></div>
         <p v-else class="hint">等待导图渲染...</p>
@@ -92,9 +103,9 @@ const emit = defineEmits([
       <div v-if="aiViewTab === 'subtitle'" class="list-box">
         <p class="meta"><strong>字幕分段</strong></p>
         <div class="mindmap-actions">
-          <button class="open-btn" @click="emit('downloadSubtitleFile', 'txt')">下载 TXT</button>
-          <button class="open-btn" @click="emit('downloadSubtitleFile', 'srt')">下载 SRT</button>
-          <button class="open-btn" @click="emit('downloadSubtitleFile', 'vtt')">下载 VTT</button>
+          <el-button class="open-btn" @click="emit('downloadSubtitleFile', 'txt')">下载 TXT</el-button>
+          <el-button class="open-btn" @click="emit('downloadSubtitleFile', 'srt')">下载 SRT</el-button>
+          <el-button class="open-btn" @click="emit('downloadSubtitleFile', 'vtt')">下载 VTT</el-button>
         </div>
         <div class="segments-box" v-if="aiResult?.subtitle_segments?.length">
           <p v-for="(seg, idx) in aiResult.subtitle_segments" :key="`seg-${idx}`" class="segment-line">
@@ -285,6 +296,28 @@ h2 {
   margin: 6px 0 0;
   color: #cf456b;
   font-size: 12px;
+}
+
+.error-row {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.error-row .error {
+  margin: 0;
+}
+
+.upgrade-btn {
+  border: 1px solid #1f6fff;
+  background: #1f6fff;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .empty {

@@ -163,6 +163,7 @@ npm run dev
 - `docs/项目总结文档.md`
 - `docs/AI总结接口说明.md`
 - `docs/会员系统开发进度.md`
+- `docs/前端重构说明-ElementPlus.md`
 
 ## 前端 UI V2 说明（2026-03）
 

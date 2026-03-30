@@ -5,12 +5,14 @@ import json
 import re
 from typing import Any, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.config import settings
+from api.services.auth_service import AuthUser, get_current_user
 from api.services.ai_summary import AISummaryError, DeepSeekSummaryService
+from api.services.membership_service import consume_ai_summary_quota, preview_ai_summary_quota
 from api.services.subtitle_extractor import SubtitleExtractor, SubtitleExtractorError
 
 router = APIRouter(prefix="/api/ai-summary", tags=["ai-summary"])
@@ -88,7 +90,10 @@ def _extract_partial_result(raw_text: str) -> dict[str, Any]:
 
 
 @router.post("/stream")
-async def stream_summary(payload: SummaryStreamRequest) -> StreamingResponse:
+async def stream_summary(
+    payload: SummaryStreamRequest,
+    current_user: AuthUser = Depends(get_current_user),
+) -> StreamingResponse:
     async def event_generator():
         try:
             yield _sse_event("stage", {"stage": "started", "message": "Summary request accepted."})
@@ -97,6 +102,7 @@ async def stream_summary(payload: SummaryStreamRequest) -> StreamingResponse:
                 payload.url.strip(),
                 payload.language,
             )
+            quota_info = consume_ai_summary_quota(current_user.user_id)
             yield _sse_event(
                 "stage",
                 {
@@ -105,6 +111,7 @@ async def stream_summary(payload: SummaryStreamRequest) -> StreamingResponse:
                     "source": subtitle_result.source,
                     "chars": len(subtitle_result.text),
                     "segments": len(subtitle_result.segments),
+                    "quota": quota_info,
                 },
             )
 
@@ -143,6 +150,18 @@ async def stream_summary(payload: SummaryStreamRequest) -> StreamingResponse:
         except Exception as exc:  # noqa: BLE001
             yield _sse_event("error", {"message": f"Unexpected error: {exc}"})
             yield _sse_event("done", {"ok": False})
+
+    preview = preview_ai_summary_quota(current_user.user_id)
+    if bool(preview.get("exceeded")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "AI_DAILY_LIMIT_EXCEEDED",
+                "message": "Today's free AI summary quota has been exhausted. Upgrade to VIP for unlimited usage.",
+                "limit": int(preview.get("limit") or 0),
+                "used": int(preview.get("used") or 0),
+            },
+        )
 
     return StreamingResponse(
         event_generator(),

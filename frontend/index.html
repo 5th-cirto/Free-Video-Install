@@ -1,13 +1,190 @@
 <!DOCTYPE html>
-<html lang="">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8">
     <link rel="icon" href="/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vite App</title>
+    <!-- 正式上线的站点根地址由 Vite 根据环境变量 VITE_PUBLIC_SITE_URL 在构建时注入（见 vite.config.js）；未设置时 canonical 为相对路径 / -->
+    <link rel="canonical" href="__SEO_PUBLIC_ROOT__" />
+    <title>万能视频下载总结器｜视频链接解析、本地下载与 AI 摘要思维导图</title>
+    <meta
+      name="description"
+      content="万能视频下载总结器：本地 Web 工作台与自托管后端，支持视频链接解析与格式选择、单条与批量本地下载任务；在具备平台字幕时提供 AI 视频摘要、章节大纲、核心要点与思维导图（Mermaid）及字幕导出。适用于离线观看、课程整理与素材归档。机器可读摘要见 /llms.txt。"
+    >
+    <meta
+      name="keywords"
+      content="视频下载,视频解析,批量下载,AI视频总结,视频摘要,思维导图,字幕提取,B站,YouTube,本地下载,万能下载器"
+    >
+    <meta name="robots" content="index,follow">
+    <meta name="author" content="万能视频下载总结器">
+    <meta name="application-name" content="万能视频下载总结器" />
+    <link rel="help" type="text/plain" title="GEO 事实摘要（llms.txt）" href="/llms.txt" />
+    <link rel="alternate" type="text/plain" title="LLM 可读站点说明 GEO" href="/llms.txt" />
+    <meta name="theme-color" content="#1f6fff">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:site_name" content="万能视频下载总结器">
+    <meta property="og:url" content="__SEO_PUBLIC_ROOT__" />
+    <meta property="og:title" content="万能视频下载总结器｜视频解析、本地下载与 AI 总结">
+    <meta
+      property="og:description"
+      content="视频链接解析、本地落盘下载与 AI 摘要、大纲、思维导图一体化工作台。"
+    >
+    <meta name="twitter:card" content="__TWITTER_CARD__">
+    <meta name="twitter:title" content="万能视频下载总结器｜视频解析、本地下载与 AI 总结">
+    <meta
+      name="twitter:description"
+      content="视频链接解析、本地落盘下载与 AI 摘要、大纲、思维导图一体化工作台。"
+    >
+    __OG_IMAGE_META__
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "__SEO_PUBLIC_ROOT__#organization",
+            "name": "万能视频下载总结器",
+            "url": "__SEO_PUBLIC_ROOT__",
+            "description": "本地 Web 工作台与自托管后端，提供视频链接解析、本地下载与基于平台字幕的 AI 结构化摘要。",
+            "inLanguage": "zh-CN"
+          },
+          {
+            "@type": "WebSite",
+            "@id": "__SEO_PUBLIC_ROOT__#website",
+            "name": "万能视频下载总结器",
+            "alternateName": ["万能视频下载器", "万能视频下载站"],
+            "description": "视频链接解析、本地下载任务管理与基于平台字幕的 AI 视频摘要、章节大纲、核心要点与 Mermaid 思维导图。",
+            "inLanguage": "zh-CN",
+            "url": "__SEO_PUBLIC_ROOT__",
+            "publisher": { "@id": "__SEO_PUBLIC_ROOT__#organization" },
+            "potentialAction": {
+              "@type": "ReadAction",
+              "name": "LLM 可读站点说明（GEO）",
+              "target": "__SEO_PUBLIC_ROOT__llms.txt"
+            }
+          },
+          {
+            "@type": "WebApplication",
+            "name": "万能视频下载总结器",
+            "url": "__SEO_PUBLIC_ROOT__",
+            "description": "视频链接解析、本地下载任务管理与基于平台字幕的 AI 视频摘要、大纲与思维导图。",
+            "applicationCategory": "MultimediaApplication",
+            "operatingSystem": "Windows, macOS, Linux",
+            "browserRequirements": "需要 JavaScript。完整下载与 AI 总结能力需配合本地后端服务运行。",
+            "featureList": [
+              "视频链接解析与清晰度/格式选择",
+              "单条与批量下载任务与进度",
+              "本地下载目录展示与打开文件位置",
+              "基于平台字幕的 AI 视频摘要",
+              "章节大纲与核心要点",
+              "Mermaid 思维导图与字幕 TXT/SRT/VTT 导出"
+            ],
+            "inLanguage": "zh-CN",
+            "isAccessibleForFree": true,
+            "knowsAbout": [
+              "视频下载",
+              "视频解析",
+              "AI视频摘要",
+              "平台字幕",
+              "Bilibili",
+              "YouTube",
+              "思维导图",
+              "Mermaid",
+              "本地下载管理",
+              "生成式检索优化"
+            ],
+            "provider": { "@id": "__SEO_PUBLIC_ROOT__#organization" },
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+          },
+          {
+            "@type": "HowTo",
+            "@id": "__SEO_PUBLIC_ROOT__#howto-download-summarize",
+            "inLanguage": "zh-CN",
+            "name": "如何使用万能视频下载总结器下载视频并查看 AI 总结",
+            "description": "在已部署本地或自托管后端的前提下：复制视频链接，在工作台解析并选择格式发起本地下载；若视频具备平台内嵌字幕，解析成功后可同屏查看基于字幕的 AI 摘要、大纲、要点与思维导图。",
+            "totalTime": "PT5M",
+            "tool": [{ "@type": "HowToTool", "name": "万能视频下载总结器 Web 工作台" }],
+            "step": [
+              {
+                "@type": "HowToStep",
+                "position": 1,
+                "name": "复制视频链接",
+                "text": "在 YouTube、Bilibili、抖音等站点打开目标视频，复制分享链接或浏览器地址栏中的视频 URL。"
+              },
+              {
+                "@type": "HowToStep",
+                "position": 2,
+                "name": "粘贴并解析",
+                "text": "在工作台输入框粘贴链接并发起解析，查看标题、时长、封面及可选清晰度与格式列表。"
+              },
+              {
+                "@type": "HowToStep",
+                "position": 3,
+                "name": "下载并可查看 AI 总结",
+                "text": "选择合适的格式创建本地下载任务；在具备平台字幕时，可查看流式 AI 摘要、章节大纲、核心要点与 Mermaid 思维导图，并导出字幕文件。"
+              }
+            ]
+          },
+          {
+            "@type": "FAQPage",
+            "inLanguage": "zh-CN",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "万能视频下载总结器是什么？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "一款运行在用户本地或自有服务器上的 Web 工作台：解析常见视频链接、创建本地下载任务并展示进度，并在视频具备平台内嵌字幕时，由大模型生成摘要、章节大纲、核心要点与思维导图等结构化结果。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "AI 视频总结是如何生成的？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "服务端先尽量提取平台已提供的字幕文本（如通过 yt-dlp 或站点特定的字幕接口），再将字幕作为输入进行流式结构化总结；若无可用字幕，则会提示无法完成总结，而非对无文本视频即兴编造内容。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "为什么需要本地后端？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "链接解析、下载、打开本地路径与字幕抽取等能力由 FastAPI 与 yt-dlp 等在用户环境中执行；仅部署静态前端页面无法独立完成这些步骤。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "哪些内容适合被总结？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "适合带有可用平台字幕的教学、访谈、解说类等视频；无字幕或平台限制导致无法取回字幕时，总结功能不可用。用户应遵守各平台服务条款与当地法律法规。"
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "站点是否提供云端多租户账号体系？",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "当前产品阶段以本地任务与内存态状态为主，不提供完整的云端账号、数据库持久化任务历史或商业化订阅闭环；具体以实际部署版本为准。"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      <div style="max-width: 40rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.5; color: #162544;">
+        <p><strong>万能视频下载总结器</strong> 需要在浏览器中启用 JavaScript，才能使用视频链接解析、本地下载、任务管理与 AI 摘要等功能。</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

@@ -21,9 +21,9 @@ const emit = defineEmits(['toggle', 'openLocalPath'])
     <button class="task-summary" @click="emit('toggle')">
       <strong>任务中心</strong>
       <div class="chips">
-        <span>进行中 {{ runningCount }}</span>
-        <span>成功 {{ successCount }}</span>
-        <span>失败 {{ failedCount }}</span>
+        <el-tag>进行中 {{ runningCount }}</el-tag>
+        <el-tag type="success">成功 {{ successCount }}</el-tag>
+        <el-tag type="danger">失败 {{ failedCount }}</el-tag>
       </div>
       <span class="arrow">{{ expanded ? '收起' : '展开' }}</span>
     </button>
@@ -35,19 +35,22 @@ const emit = defineEmits(['toggle', 'openLocalPath'])
         <article v-for="task in tasks" :key="task.task_id" class="task-item">
           <div class="task-top">
             <strong>{{ task.payload?.url || 'unknown url' }}</strong>
-            <span :class="['pill', task.status]">{{ task.status }}</span>
+            <el-tag :type="task.status === 'success' ? 'success' : task.status === 'failed' ? 'danger' : 'primary'">
+              {{ task.status }}
+            </el-tag>
           </div>
-          <div class="progress"><div class="bar" :style="{ width: `${Math.round(task.progress || 0)}%` }" /></div>
+          <el-progress :percentage="Math.round(task.progress || 0)" :stroke-width="8" :show-text="false" />
           <div class="task-meta">
             <span>{{ Math.round(task.progress || 0) }}%</span>
             <span v-if="task.result?.filepath">文件: {{ task.result.filepath }}</span>
-            <button
+            <el-button
               v-if="task.result?.filepath && task.status === 'success'"
               class="open-btn"
+              size="small"
               @click="emit('openLocalPath', task.result.filepath)"
             >
               打开文件位置
-            </button>
+            </el-button>
             <span v-else-if="task.error" class="error">原因: {{ task.error }}</span>
           </div>
         </article>

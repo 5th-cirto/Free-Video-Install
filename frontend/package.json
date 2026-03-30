@@ -10,8 +10,10 @@
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
     "axios": "^1.14.0",
     "canvg": "^4.0.3",
+    "element-plus": "^2.13.6",
     "mermaid": "^11.13.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.30",

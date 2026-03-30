@@ -33,6 +33,10 @@ const emit = defineEmits([
 function updateValue(eventName, event) {
   emit(eventName, event?.target?.value || '')
 }
+
+function updateModel(eventName, value) {
+  emit(eventName, value || '')
+}
 </script>
 
 <template>
@@ -41,8 +45,15 @@ function updateValue(eventName, event) {
     <div class="panel-head">
       <h2>下载工作台</h2>
       <div class="mode-switch">
-        <button :class="{ active: mode === 'single' }" @click="emit('update:mode', 'single')">单条</button>
-        <button :class="{ active: mode === 'batch' }" @click="emit('update:mode', 'batch')">批量</button>
+        <el-segmented
+          class="mode-segment"
+          :model-value="mode"
+          :options="[
+            { label: '单条', value: 'single' },
+            { label: '批量', value: 'batch' },
+          ]"
+          @update:model-value="emit('update:mode', $event)"
+        />
       </div>
     </div>
 
@@ -65,26 +76,26 @@ function updateValue(eventName, event) {
     <!-- 单条模式 -->
     <div v-if="mode === 'single'" class="field-group">
       <label>视频链接</label>
-      <input
-        :value="singleUrl"
-        type="text"
+      <el-input
+        :model-value="singleUrl"
         placeholder="粘贴视频链接，如 https://..."
-        @input="updateValue('update:singleUrl', $event)"
+        @update:model-value="updateModel('update:singleUrl', $event)"
       />
-      <button class="action strong" :disabled="inspectLoading" @click="emit('inspect')">
+      <el-button class="action strong" type="primary" :loading="inspectLoading" @click="emit('inspect')">
         {{ inspectLoading ? '解析中...' : '解析视频信息 + 自动AI总结' }}
-      </button>
-      <p v-if="inspectError" class="error">{{ inspectError }}</p>
+      </el-button>
+      <el-alert v-if="inspectError" :title="inspectError" type="error" :closable="false" show-icon />
     </div>
 
     <!-- 批量模式 -->
     <div v-else class="field-group">
       <label>批量链接（每行一条）</label>
-      <textarea
-        :value="batchInput"
-        rows="5"
+      <el-input
+        :model-value="batchInput"
+        type="textarea"
+        :rows="5"
         placeholder="https://example.com/video-1&#10;https://example.com/video-2"
-        @input="updateValue('update:batchInput', $event)"
+        @update:model-value="updateModel('update:batchInput', $event)"
       />
       <p class="hint">当前识别 {{ parsedBatchUrls.length }} 条链接</p>
     </div>
@@ -92,28 +103,38 @@ function updateValue(eventName, event) {
     <!-- 格式选择（作用于下载任务提交） -->
     <div class="field-group">
       <label>目标格式（可选）</label>
-      <select :value="selectedFormatId" @change="updateValue('update:selectedFormatId', $event)">
-        <option value="">自动选择（推荐）</option>
-        <option v-for="fmt in inspectInfo?.formats || []" :key="`${fmt.format_id}-${fmt.ext}`" :value="fmt.format_id">
-          {{ fmt.format_id }} · {{ fmt.ext }} · {{ fmt.resolution || '未知分辨率' }}
-        </option>
-      </select>
+      <el-select
+        :model-value="selectedFormatId"
+        placeholder="自动选择（推荐）"
+        style="width: 100%"
+        @update:model-value="updateModel('update:selectedFormatId', $event)"
+      >
+        <el-option label="自动选择（推荐）" value="" />
+        <el-option
+          v-for="fmt in inspectInfo?.formats || []"
+          :key="`${fmt.format_id}-${fmt.ext}`"
+          :label="`${fmt.format_id} · ${fmt.ext} · ${fmt.resolution || '未知分辨率'}`"
+          :value="fmt.format_id"
+        />
+      </el-select>
     </div>
 
     <!-- 下载提交按钮 -->
     <div class="submit-row">
-      <button
+      <el-button
         v-if="mode === 'single'"
         class="action"
-        :disabled="actionLoading || !singleUrl.trim()"
+        type="primary"
+        :loading="actionLoading"
+        :disabled="!singleUrl.trim()"
         @click="emit('createSingleDownload')"
       >
         {{ actionLoading ? '提交中...' : '开始下载当前视频' }}
-      </button>
-      <button v-else class="action" :disabled="actionLoading" @click="emit('createBatchDownload')">
+      </el-button>
+      <el-button v-else class="action" type="primary" :loading="actionLoading" @click="emit('createBatchDownload')">
         {{ actionLoading ? '提交中...' : '开始批量下载' }}
-      </button>
-      <p v-if="actionError" class="error">{{ actionError }}</p>
+      </el-button>
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon />
     </div>
 
     <p v-if="downloadsDir" class="hint">默认下载目录：{{ downloadsDir }}</p>
@@ -153,27 +174,33 @@ h2 {
 
 /* 模式切换按钮组 */
 .mode-switch {
-  border: 1px solid #d2dcee;
-  border-radius: 999px;
-  padding: 3px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0;
   display: flex;
-  gap: 4px;
-  background: #f7faff;
+  background: transparent;
 }
 
-.mode-switch button {
-  border: 0;
-  background: transparent;
-  border-radius: 999px;
-  padding: 6px 10px;
-  cursor: pointer;
+:deep(.mode-segment.el-segmented) {
+  --el-segmented-bg-color: #f7faff;
+  --el-border-color: #d2dcee;
+  --el-segmented-item-selected-color: #ffffff;
+  border-radius: 10px;
+  padding: 3px;
+  min-height: 34px;
+}
+
+:deep(.mode-segment .el-segmented__item) {
+  border-radius: 8px;
   color: #5a6d96;
   font-size: 12px;
+  font-weight: 600;
 }
 
-.mode-switch button.active {
+:deep(.mode-segment .el-segmented__item.is-selected) {
   background: #1f6fff;
   color: #fff;
+  box-shadow: none;
 }
 
 /* 视频封面卡片：封面完整显示，不裁切 */

@@ -5,7 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import settings
 from api.routers.ai_summary import router as ai_summary_router
+from api.routers.auth import router as auth_router
+from api.routers.billing import router as billing_router
 from api.routers.video import router as video_router
+from api.services.sqlite_db import init_sqlite_schema
 
 app = FastAPI(
     title=settings.app_name,
@@ -27,6 +30,13 @@ def health() -> dict[str, str]:
     return {"status": "ok", "env": settings.env}
 
 
+@app.on_event("startup")
+def startup() -> None:
+    init_sqlite_schema()
+
+
 app.include_router(video_router)
 app.include_router(ai_summary_router)
+app.include_router(auth_router)
+app.include_router(billing_router)
 

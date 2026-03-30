@@ -4,7 +4,13 @@ defineProps({
   runningCount: { type: Number, default: 0 },
   successCount: { type: Number, default: 0 },
   failedCount: { type: Number, default: 0 },
+  userEmail: { type: String, default: '' },
+  isVip: { type: Boolean, default: false },
+  vipValidUntil: { type: String, default: '' },
+  billingLoading: { type: Boolean, default: false },
+  paymentSandbox: { type: Boolean, default: false },
 })
+defineEmits(['login', 'register', 'logout', 'buy-vip', 'open-billing'])
 </script>
 
 <template>
@@ -13,14 +19,26 @@ defineProps({
     <div class="brand-wrap">
       <span class="badge">PRO</span>
       <div class="brand-text">
-        <strong>万能视频下载器</strong>
+        <h1 class="brand-heading">万能视频下载总结器</h1>
         <span>下载与 AI 总结一体化工作台</span>
       </div>
     </div>
-    <div class="quick-stats">
-      <span>进行中 {{ runningCount }}</span>
-      <span>成功 {{ successCount }}</span>
-      <span>失败 {{ failedCount }}</span>
+    <div class="account-panel">
+      <template v-if="userEmail">
+        <el-tag class="account-tag">账号 {{ userEmail }}</el-tag>
+        <el-tag v-if="isVip" class="member-tag member-tag-vip" type="warning">VIP {{ vipValidUntil || '有效期内' }}</el-tag>
+        <el-tag v-else class="member-tag" type="info">免费版</el-tag>
+        <el-tag v-if="paymentSandbox" class="member-tag member-tag-sandbox" type="warning">支付沙盒模式</el-tag>
+        <el-button class="action-btn" @click="$emit('open-billing')">账单记录</el-button>
+        <el-button v-if="!isVip" class="action-btn action-primary" type="primary" :loading="billingLoading" @click="$emit('buy-vip')">
+          {{ billingLoading ? '跳转中...' : paymentSandbox ? '开通 VIP（测试）' : '开通 VIP' }}
+        </el-button>
+        <el-button class="action-btn" @click="$emit('logout')">退出登录</el-button>
+      </template>
+      <template v-else>
+        <el-button class="action-btn action-primary" type="primary" @click="$emit('login')">登录</el-button>
+        <el-button class="action-btn" @click="$emit('register')">注册</el-button>
+      </template>
     </div>
   </header>
 </template>
@@ -61,9 +79,11 @@ defineProps({
   gap: 2px;
 }
 
-.brand-text strong {
+.brand-text .brand-heading {
+  margin: 0;
   color: #162544;
   font-size: 16px;
+  font-weight: 700;
   line-height: 1.1;
 }
 
@@ -90,6 +110,59 @@ defineProps({
   white-space: nowrap;
 }
 
+.account-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.account-tag,
+.member-tag {
+  border: 1px solid #d4dded;
+  background: #f7faff;
+  color: #43557d;
+  border-radius: 999px;
+  font-size: 12px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.member-tag-vip {
+  border-color: #ffd57c;
+  background: #fff7e3;
+  color: #996900;
+}
+
+.member-tag-sandbox {
+  border-color: #ffd1a6;
+  background: #fff2e5;
+  color: #9f4e00;
+}
+
+.action-btn {
+  border: 1px solid #d4dded;
+  background: #ffffff;
+  color: #33476f;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.action-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.action-primary {
+  border-color: #1f6fff;
+  background: #1f6fff;
+  color: #fff;
+}
+
 /* 小屏下改为纵向布局，避免挤压 */
 @media (max-width: 960px) {
   .top-nav {
@@ -99,6 +172,11 @@ defineProps({
 
   .quick-stats {
     width: 100%;
+  }
+
+  .account-panel {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 </style>

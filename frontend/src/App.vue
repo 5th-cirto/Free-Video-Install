@@ -1,18 +1,62 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import axios from 'axios'
+import { aiSummaryStreamApi } from './api/aiSummary'
+import { ordersApi, checkoutSessionApi, membershipStatusApi } from './api/billing'
+import { configureApiClient, apiBase } from './api/client'
+import { loginApi, meApi, registerApi, requestPasswordResetApi, resetPasswordApi } from './api/auth'
+import {
+  buildThumbnailUrl,
+  createBatchDownloadApi,
+  createDownloadApi,
+  downloadSubtitleApi,
+  inspectVideoApi,
+  openPathApi,
+  runtimeConfigApi,
+  tasksApi,
+} from './api/video'
+import { extractFilename, triggerBlobDownload } from './utils/download'
+import { getAxiosDetail, getAxiosMessage } from './utils/axiosErrors'
+import { formatDuration, formatSubtitleTime, formatTimestamp } from './utils/format'
+import { parseSseMessage } from './utils/sse'
 import DownloadPanel from './components/DownloadPanel.vue'
+import InPageNav from './components/InPageNav.vue'
+import LandingSeoSections from './components/LandingSeoSections.vue'
+import SiteSeoFooter from './components/SiteSeoFooter.vue'
+import TechCredibilityStrip from './components/TechCredibilityStrip.vue'
 import StudioHeader from './components/StudioHeader.vue'
 import SummaryPanel from './components/SummaryPanel.vue'
 import TaskCenterPanel from './components/TaskCenterPanel.vue'
+import AuthDialog from './components/dialogs/AuthDialog.vue'
+import BillingDialog from './components/dialogs/BillingDialog.vue'
+import MindmapDialog from './components/dialogs/MindmapDialog.vue'
 
-// 后端 API 地址：支持通过 VITE_API_BASE 覆盖，默认本地 8000。
-const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
-// Axios 实例：统一 baseURL 与请求头，便于后续集中扩展（如拦截器）。
-const apiClient = axios.create({
-  baseURL: apiBase,
-  headers: { 'Content-Type': 'application/json' },
+const ACCESS_TOKEN_KEY = 'uvd_access_token'
+const savedToken = localStorage.getItem(ACCESS_TOKEN_KEY) || ''
+const accessToken = ref(savedToken)
+
+// =============================
+// 账号 / 会员状态
+// =============================
+const currentUser = ref(null)
+const membershipStatus = ref({
+  is_vip: false,
+  plan_code: 'free',
+  valid_until: '',
 })
+const billingLoading = ref(false)
+const authDialogVisible = ref(false)
+const authMode = ref('login')
+const authEmail = ref('')
+const authPassword = ref('')
+const authConfirmPassword = ref('')
+const authActionToken = ref('')
+const authLoading = ref(false)
+const authError = ref('')
+const authInfo = ref('')
+const billingDialogVisible = ref(false)
+const billingHistoryLoading = ref(false)
+const billingOrders = ref([])
 
 // =============================
 // 下载工作台状态
@@ -34,6 +78,7 @@ const downloadsDir = ref('')
 const aiLanguage = ref('')
 const aiLoading = ref(false)
 const aiError = ref('')
+const aiQuotaExceeded = ref(false)
 const aiStage = ref('')
 const aiRaw = ref('')
 const aiResult = ref(null)
@@ -69,6 +114,9 @@ const failedCount = computed(() => tasks.value.filter((task) => task.status === 
 const runningCount = computed(() =>
   tasks.value.filter((task) => task.status === 'running' || task.status === 'queued').length,
 )
+const isLoggedIn = computed(() => Boolean(currentUser.value?.email))
+const isVipUser = computed(() => Boolean(membershipStatus.value?.is_vip))
+const vipValidUntilText = computed(() => membershipStatus.value?.valid_until || '')
 
 // AI 展示优先使用最终结果；流式中间态作为回退。
 const aiDisplayResult = computed(() => aiResult.value || aiPartialResult.value)
@@ -116,63 +164,239 @@ const hasAiContent = computed(
 const aiViewTab = ref('summary')
 const taskCenterExpanded = ref(false)
 
-// 将秒数格式化为 mm:ss / hh:mm:ss。
-function formatDuration(seconds) {
-  if (!seconds || Number.isNaN(seconds)) return '--:--'
-  const total = Math.floor(seconds)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const secs = total % 60
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-  return `${minutes}:${String(secs).padStart(2, '0')}`
-}
-
-// 字幕时间格式化（用于页面展示）。
-function formatTimestamp(seconds) {
-  const value = Number(seconds || 0)
-  if (!Number.isFinite(value) || value < 0) return '00:00'
-  const total = Math.floor(value)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const secs = total % 60
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-}
-
 // 封面统一走后端代理，避免第三方跨域或防盗链导致的加载失败。
 function thumbnailUrl(rawUrl) {
-  if (!rawUrl) return ''
-  return `${apiBase}/api/video/thumbnail?url=${encodeURIComponent(rawUrl)}`
+  return buildThumbnailUrl(rawUrl)
 }
 
-// 从 axios 异常中提取可读错误信息，优先后端 detail 字段。
-function getAxiosMessage(error, fallback = '请求失败') {
-  if (!axios.isAxiosError(error)) {
-    return String(error?.message || fallback)
+function setAccessToken(token) {
+  accessToken.value = token || ''
+  if (accessToken.value) {
+    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken.value)
+  } else {
+    localStorage.removeItem(ACCESS_TOKEN_KEY)
   }
-  const detail = error.response?.data?.detail
-  const message = error.response?.data?.message
-  if (typeof detail === 'string' && detail.trim()) return detail
-  if (typeof message === 'string' && message.trim()) return message
-  if (typeof error.message === 'string' && error.message.trim()) return error.message
-  return fallback
 }
 
-// 通用 JSON API 调用封装（axios 版本）。
-async function callApi(path, payload = null, method = 'GET') {
+function clearSession() {
+  setAccessToken('')
+  currentUser.value = null
+  membershipStatus.value = {
+    is_vip: false,
+    plan_code: 'free',
+    valid_until: '',
+  }
+}
+
+configureApiClient({
+  getAccessToken: () => accessToken.value,
+  onUnauthorized: clearSession,
+})
+
+function openAuthDialog(mode = 'login') {
+  authMode.value = mode
+  authError.value = ''
+  authInfo.value = ''
+  authDialogVisible.value = true
+}
+
+function closeAuthDialog() {
+  authDialogVisible.value = false
+  authError.value = ''
+  authInfo.value = ''
+  authPassword.value = ''
+  authConfirmPassword.value = ''
+  authActionToken.value = ''
+}
+
+function switchAuthMode() {
+  if (authMode.value === 'register') authMode.value = 'login'
+  else if (authMode.value === 'login') authMode.value = 'register'
+  else authMode.value = 'login'
+  authError.value = ''
+  authInfo.value = ''
+  authPassword.value = ''
+  authConfirmPassword.value = ''
+  authActionToken.value = ''
+}
+
+function openBillingDialog() {
+  if (!isLoggedIn.value) {
+    openAuthDialog('login')
+    return
+  }
+  billingDialogVisible.value = true
+  loadBillingOrders()
+}
+
+function closeBillingDialog() {
+  billingDialogVisible.value = false
+}
+
+async function loadMembershipStatus() {
+  if (!accessToken.value) return
   try {
-    const response = await apiClient.request({
-      url: path,
-      method,
-      data: payload || undefined,
-    })
-    return response.data
-  } catch (error) {
-    const text = getAxiosMessage(error)
-    if (text.includes('Network Error') || text.includes('ERR_NETWORK')) {
-      throw new Error(`无法连接后端接口(${apiBase})。请确认后端已启动，并允许当前前端端口跨域访问。`)
+    const resp = await membershipStatusApi()
+    membershipStatus.value = {
+      is_vip: Boolean(resp?.data?.is_vip),
+      plan_code: String(resp?.data?.plan_code || 'free'),
+      valid_until: String(resp?.data?.valid_until || ''),
     }
-    throw new Error(text)
+  } catch (_error) {
+    membershipStatus.value = {
+      is_vip: false,
+      plan_code: 'free',
+      valid_until: '',
+    }
+  }
+}
+
+async function loadCurrentUser() {
+  if (!accessToken.value) return
+  try {
+    const resp = await meApi()
+    currentUser.value = {
+      user_id: resp?.data?.user_id,
+      email: resp?.data?.email || '',
+    }
+    membershipStatus.value = {
+      is_vip: Boolean(resp?.data?.membership?.is_vip),
+      plan_code: resp?.data?.membership?.is_vip ? 'vip_1m' : 'free',
+      valid_until: String(resp?.data?.membership?.vip_valid_until || ''),
+    }
+    await loadMembershipStatus()
+  } catch (_error) {
+    clearSession()
+  }
+}
+
+async function registerAccount() {
+  authError.value = ''
+  authInfo.value = ''
+  if (!authEmail.value.trim()) {
+    authError.value = '请输入邮箱'
+    return
+  }
+  if (authPassword.value.length < 8) {
+    authError.value = '密码至少 8 位'
+    return
+  }
+  if (authPassword.value !== authConfirmPassword.value) {
+    authError.value = '两次输入密码不一致'
+    return
+  }
+  authLoading.value = true
+  try {
+    await registerApi({ email: authEmail.value.trim(), password: authPassword.value })
+    authMode.value = 'login'
+    authInfo.value = '注册成功，请登录。'
+    authConfirmPassword.value = ''
+  } catch (error) {
+    authError.value = error.message || '注册失败'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function loginAccount() {
+  authError.value = ''
+  authInfo.value = ''
+  authLoading.value = true
+  try {
+    const resp = await loginApi({ email: authEmail.value.trim(), password: authPassword.value })
+    const token = resp?.data?.access_token || ''
+    if (!token) throw new Error('登录成功但未返回 token')
+    setAccessToken(token)
+    await loadCurrentUser()
+    closeAuthDialog()
+  } catch (error) {
+    authError.value = error.message || '登录失败'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function requestPasswordResetEmail() {
+  authError.value = ''
+  authInfo.value = ''
+  if (!authEmail.value.trim()) {
+    authError.value = '请输入邮箱地址后再发送重置邮件'
+    return
+  }
+  authLoading.value = true
+  try {
+    await requestPasswordResetApi({ email: authEmail.value.trim() })
+    authInfo.value = '重置密码邮件已发送，请到邮箱点击链接继续。'
+  } catch (error) {
+    authError.value = error.message || '发送重置邮件失败'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function completePasswordReset() {
+  authError.value = ''
+  authInfo.value = ''
+  if (!authActionToken.value.trim()) {
+    authError.value = '重置令牌缺失，请重新打开邮箱中的重置链接'
+    return
+  }
+  if (authPassword.value.length < 8) {
+    authError.value = '新密码至少 8 位'
+    return
+  }
+  if (authPassword.value !== authConfirmPassword.value) {
+    authError.value = '两次输入密码不一致'
+    return
+  }
+  authLoading.value = true
+  try {
+    await resetPasswordApi({ token: authActionToken.value.trim(), new_password: authPassword.value })
+    authMode.value = 'login'
+    authActionToken.value = ''
+    authPassword.value = ''
+    authConfirmPassword.value = ''
+    authInfo.value = '密码重置成功，请使用新密码登录。'
+  } catch (error) {
+    authError.value = error.message || '密码重置失败'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function loadBillingOrders() {
+  if (!isLoggedIn.value) return
+  billingHistoryLoading.value = true
+  try {
+    const resp = await ordersApi()
+    billingOrders.value = resp?.data?.orders || []
+  } catch (error) {
+    actionError.value = error.message || '加载账单记录失败'
+  } finally {
+    billingHistoryLoading.value = false
+  }
+}
+
+function logoutAccount() {
+  clearSession()
+}
+
+async function startVipCheckout() {
+  if (!isLoggedIn.value) {
+    openAuthDialog('login')
+    return
+  }
+  billingLoading.value = true
+  actionError.value = ''
+  try {
+    const resp = await checkoutSessionApi({ plan_code: 'vip_1m', idempotency_key: `web-${Date.now()}` })
+    const url = resp?.data?.checkout_url || ''
+    if (!url) throw new Error('未获取到支付链接')
+    window.location.href = url
+  } catch (error) {
+    actionError.value = error.message || '创建支付会话失败'
+  } finally {
+    billingLoading.value = false
   }
 }
 
@@ -188,7 +412,7 @@ async function inspectVideo() {
   }
   inspectLoading.value = true
   try {
-    const resp = await callApi('/api/video/inspect', { url: singleUrl.value.trim() }, 'POST')
+    const resp = await inspectVideoApi({ url: singleUrl.value.trim() })
     inspectInfo.value = resp.data
     aiCurrentUrl.value = singleUrl.value.trim()
     await startAiSummaryStream(singleUrl.value.trim())
@@ -204,11 +428,7 @@ async function createSingleDownload() {
   actionError.value = ''
   actionLoading.value = true
   try {
-    await callApi(
-      '/api/video/download',
-      { url: singleUrl.value.trim(), format_id: selectedFormatId.value || null },
-      'POST',
-    )
+    await createDownloadApi({ url: singleUrl.value.trim(), format_id: selectedFormatId.value || null })
     await loadTasks()
   } catch (error) {
     actionError.value = error.message
@@ -223,14 +443,10 @@ async function createBatchDownload() {
   actionLoading.value = true
   try {
     if (!parsedBatchUrls.value.length) throw new Error('请至少输入一条链接')
-    await callApi(
-      '/api/video/download/batch',
-      {
-        urls: parsedBatchUrls.value,
-        format_id: selectedFormatId.value || null,
-      },
-      'POST',
-    )
+    await createBatchDownloadApi({
+      urls: parsedBatchUrls.value,
+      format_id: selectedFormatId.value || null,
+    })
     await loadTasks()
   } catch (error) {
     actionError.value = error.message
@@ -242,7 +458,7 @@ async function createBatchDownload() {
 // 拉取任务列表（用于任务中心 + 顶部统计）。
 async function loadTasks() {
   try {
-    const resp = await callApi('/api/video/tasks')
+    const resp = await tasksApi()
     tasks.value = resp?.data?.tasks || []
   } catch (_error) {
     // Keep silent for polling to avoid noisy UI.
@@ -252,7 +468,7 @@ async function loadTasks() {
 // 拉取运行时配置（主要是默认下载目录）。
 async function loadRuntimeConfig() {
   try {
-    const resp = await callApi('/api/video/config')
+    const resp = await runtimeConfigApi()
     downloadsDir.value = resp?.data?.downloads_dir || ''
   } catch (_error) {
     downloadsDir.value = ''
@@ -263,7 +479,7 @@ async function loadRuntimeConfig() {
 async function openLocalPath(path) {
   if (!path) return
   try {
-    await callApi('/api/video/open-path?path=' + encodeURIComponent(path), null, 'POST')
+    await openPathApi(path)
   } catch (error) {
     actionError.value = error.message
   }
@@ -272,6 +488,7 @@ async function openLocalPath(path) {
 // 开始一次新的 AI 总结前，清空旧状态，避免页面残留。
 function resetAiState() {
   aiError.value = ''
+  aiQuotaExceeded.value = false
   aiStage.value = ''
   aiRaw.value = ''
   aiResult.value = null
@@ -285,32 +502,6 @@ function resetAiState() {
   mindmapRenderError.value = ''
   mindmapRenderHint.value = ''
   aiViewTab.value = 'summary'
-}
-
-// 解析 SSE 文本包，提取 event 和 data。
-function parseSseMessage(rawMessage) {
-  const lines = rawMessage.split('\n')
-  let event = 'message'
-  const dataLines = []
-  for (const line of lines) {
-    if (!line) continue
-    if (line.startsWith('event:')) {
-      event = line.slice(6).trim()
-      continue
-    }
-    if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trim())
-    }
-  }
-  let data = {}
-  if (dataLines.length) {
-    try {
-      data = JSON.parse(dataLines.join('\n'))
-    } catch (_error) {
-      data = {}
-    }
-  }
-  return { event, data }
 }
 
 // AI SSE 主流程：
@@ -362,28 +553,44 @@ async function startAiSummaryStream(urlOverride = '') {
       }
     }
 
-    await apiClient.post(
-      '/api/ai-summary/stream',
+    await aiSummaryStreamApi(
       {
         url: targetUrl,
         language: aiLanguage.value.trim() || null,
       },
-      {
-        responseType: 'text',
-        onDownloadProgress: (event) => {
-          // axios 在浏览器内通过 XHR 提供 responseText，可用来模拟增量 SSE 解析。
-          const responseText = event.event?.target?.responseText || event.currentTarget?.responseText || ''
-          if (typeof responseText !== 'string') return
-          if (responseText.length <= processedLength) return
-          buffer += responseText.slice(processedLength)
-          processedLength = responseText.length
-          flushSseBuffer()
-        },
+      (event) => {
+        // axios 在浏览器内通过 XHR 提供 responseText，可用来模拟增量 SSE 解析。
+        const responseText = event.event?.target?.responseText || event.currentTarget?.responseText || ''
+        if (typeof responseText !== 'string') return
+        if (responseText.length <= processedLength) return
+        buffer += responseText.slice(processedLength)
+        processedLength = responseText.length
+        flushSseBuffer()
       },
     )
     // 兜底：请求完成后再冲洗一次缓冲区，避免尾包漏解析。
     flushSseBuffer()
   } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      aiError.value = 'AI 总结需要先登录，请先注册/登录账号。'
+      openAuthDialog('login')
+      return
+    }
+    const detail = getAxiosDetail(error)
+    if (detail?.code === 'AI_DAILY_LIMIT_EXCEEDED') {
+      const limit = Number(detail.limit || 0)
+      const used = Number(detail.used || 0)
+      aiError.value = `今日免费额度已用完 (${used}/${limit})，开通 VIP 后可无限使用。`
+      aiQuotaExceeded.value = true
+      return
+    }
+    // Defensive fallback: even if backend detail payload is stripped by an intermediary,
+    // treat 403 from AI summary endpoint as quota/auth restriction and show friendly UX.
+    if (axios.isAxiosError(error) && error.response?.status === 403) {
+      aiError.value = '当前账号今日免费 AI 总结次数已用完，请开通 VIP 继续使用。'
+      aiQuotaExceeded.value = true
+      return
+    }
     const text = getAxiosMessage(error, 'SSE连接失败')
     if (text.includes('Network Error') || text.includes('ERR_NETWORK')) {
       aiError.value = `AI总结请求无法连接后端(${apiBase})，请检查后端服务与跨域端口配置。`
@@ -408,39 +615,68 @@ async function ensureMermaid() {
   return mermaidInstance
 }
 
+function sanitizeMindmapSource(source) {
+  const text = String(source || '').trim()
+  if (!text) return ''
+  const fencedMatch = text.match(/```(?:mermaid)?\s*([\s\S]*?)```/i)
+  const unwrapped = fencedMatch?.[1] ? fencedMatch[1] : text
+  return unwrapped
+    .replace(/\r\n/g, '\n')
+    .replace(/^\uFEFF/, '')
+    .trim()
+}
+
+function isMermaidErrorSvg(svgText) {
+  const text = String(svgText || '')
+  if (!text) return false
+  return (
+    text.includes('Syntax error in text') ||
+    text.includes('mermaid version') ||
+    text.includes('error-icon') ||
+    text.includes('class="error-message"')
+  )
+}
+
 // 根据 mindmap_mermaid 渲染 SVG；失败时尝试用大纲重建导图。
 async function renderMindmapSvg(source) {
-  if (!source) {
+  const normalizedSource = sanitizeMindmapSource(source)
+  if (!normalizedSource) {
     mindmapSvg.value = ''
     mindmapRenderError.value = ''
     mindmapRenderHint.value = ''
     return
   }
-  const fallbackSource = buildFallbackMindmapSource(aiResult.value)
+  const fallbackSource = sanitizeMindmapSource(buildFallbackMindmapSource(aiResult.value))
   try {
     const mermaid = await ensureMermaid()
     const id = `mindmap-${Date.now()}`
-    const output = await mermaid.render(id, source)
+    const output = await mermaid.render(id, normalizedSource)
+    if (isMermaidErrorSvg(output?.svg)) {
+      throw new Error('Mermaid 返回语法错误图')
+    }
     mindmapSvg.value = output.svg || ''
     mindmapRenderError.value = ''
     mindmapRenderHint.value = ''
   } catch (error) {
     try {
-      if (fallbackSource && fallbackSource !== source) {
+      if (fallbackSource && fallbackSource !== normalizedSource) {
         const mermaid = await ensureMermaid()
         const id = `mindmap-fallback-${Date.now()}`
         const output = await mermaid.render(id, fallbackSource)
+        if (isMermaidErrorSvg(output?.svg)) {
+          throw new Error('Fallback Mermaid 返回语法错误图')
+        }
         mindmapSvg.value = output.svg || ''
         mindmapRenderError.value = ''
-        mindmapRenderHint.value = '模型返回的导图语法无效，已使用大纲自动重建导图。'
+        mindmapRenderHint.value = '导图语法异常，已自动回退到大纲导图。'
         return
       }
     } catch (_fallbackError) {
       // Keep original error below.
     }
     mindmapSvg.value = ''
-    mindmapRenderHint.value = ''
-    mindmapRenderError.value = error?.message || '思维导图渲染失败'
+    mindmapRenderHint.value = '导图语法异常，请重试。'
+    mindmapRenderError.value = ''
   }
 }
 
@@ -488,18 +724,6 @@ function getMindmapSvgText() {
   return mindmapSvg.value.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
 }
 
-// 通用 Blob 下载函数（导图和字幕下载都复用）。
-function triggerBlobDownload(blob, filename) {
-  const objectUrl = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = objectUrl
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(objectUrl)
-}
-
 // 导出当前导图为 SVG 文件。
 function downloadMindmapSvg() {
   try {
@@ -509,24 +733,6 @@ function downloadMindmapSvg() {
   } catch (error) {
     aiError.value = error.message || '导出 SVG 失败'
   }
-}
-
-// 从响应头解析文件名。
-function extractFilename(disposition, fallback) {
-  const match = /filename="?([^"]+)"?/i.exec(disposition || '')
-  return match?.[1] || fallback
-}
-
-// 字幕时间格式化（SRT 与 VTT 分隔符不同）。
-function formatSubtitleTime(seconds, forSrt = true) {
-  const value = Math.max(0, Number(seconds || 0))
-  const totalMs = Math.round(value * 1000)
-  const hours = Math.floor(totalMs / 3600000)
-  const minutes = Math.floor((totalMs % 3600000) / 60000)
-  const secs = Math.floor((totalMs % 60000) / 1000)
-  const millis = totalMs % 1000
-  const sep = forSrt ? ',' : '.'
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}${sep}${String(millis).padStart(3, '0')}`
 }
 
 // 基于 aiResult 组装本地字幕内容（后端不可用时兜底下载）。
@@ -579,15 +785,11 @@ async function downloadSubtitleFile(format) {
   }
   aiError.value = ''
   try {
-    const response = await apiClient.post(
-      '/api/video/subtitles/download',
-      {
-        url: targetUrl,
-        language: aiLanguage.value.trim() || null,
-        format,
-      },
-      { responseType: 'blob' },
-    )
+    const response = await downloadSubtitleApi({
+      url: targetUrl,
+      language: aiLanguage.value.trim() || null,
+      format,
+    })
     const disposition = response.headers?.['content-disposition'] || ''
     triggerBlobDownload(response.data, extractFilename(disposition, `subtitle.${format}`))
   } catch (error) {
@@ -603,6 +805,19 @@ async function downloadSubtitleFile(format) {
 // - mounted: 加载配置与任务，并启动轮询
 // - unmounted: 释放轮询
 onMounted(async () => {
+  const params = new URLSearchParams(window.location.search)
+  const action = params.get('action') || ''
+  const token = params.get('token') || ''
+  if (action === 'reset_password' && token) {
+    openAuthDialog('reset')
+    authActionToken.value = token
+    authInfo.value = '请输入新密码完成重置。'
+    window.history.replaceState({}, '', window.location.pathname + window.location.hash)
+  }
+
+  if (accessToken.value) {
+    await loadCurrentUser()
+  }
   await loadRuntimeConfig()
   await loadTasks()
   pollTimer = setInterval(loadTasks, 2000)
@@ -616,16 +831,44 @@ onUnmounted(() => {
 <template>
   <!-- 页面壳层：顶部状态栏 + 双栏工作区 + 可折叠任务中心 -->
   <div class="app-shell">
-    <StudioHeader :running-count="runningCount" :success-count="successCount" :failed-count="failedCount" />
+    <a class="skip-to-workspace" href="#section-workspace">跳到工作台</a>
+    <StudioHeader
+      :running-count="runningCount"
+      :success-count="successCount"
+      :failed-count="failedCount"
+      :user-email="currentUser?.email || ''"
+      :is-vip="isVipUser"
+      :vip-valid-until="vipValidUntilText"
+      :billing-loading="billingLoading"
+      @login="openAuthDialog('login')"
+      @register="openAuthDialog('register')"
+      @logout="logoutAccount"
+      @open-billing="openBillingDialog"
+      @buy-vip="startVipCheckout"
+    />
+
+    <InPageNav />
+
+    <main class="studio-main">
+    <div id="section-guide" class="anchor-target">
+      <LandingSeoSections />
+    </div>
+
+    <!--<TechCredibilityStrip />-->
 
     <!-- 双栏工作区：左下载、右总结（移动端改为单列） -->
-    <section class="studio-layout">
+    <section
+      id="section-workspace"
+      class="studio-layout anchor-target"
+      aria-label="视频下载与 AI 总结工作台"
+    >
       <!-- 右侧总结面板（桌面端显示在右侧） -->
       <SummaryPanel
         class="right-column"
         :ai-stage="aiStage"
         :ai-loading="aiLoading"
         :ai-error="aiError"
+        :ai-quota-exceeded="aiQuotaExceeded"
         :ai-view-tab="aiViewTab"
         :has-ai-content="hasAiContent"
         :ai-streaming-summary="aiStreamingSummary"
@@ -641,6 +884,7 @@ onUnmounted(() => {
         @open-mindmap-fullscreen="openMindmapFullscreen"
         @download-mindmap-svg="downloadMindmapSvg"
         @download-subtitle-file="downloadSubtitleFile"
+        @upgrade-vip="startVipCheckout"
       />
 
       <!-- 左侧下载面板 -->
@@ -669,27 +913,61 @@ onUnmounted(() => {
       />
     </section>
 
-    <!-- 次级任务中心：默认折叠 -->
-    <TaskCenterPanel
-      :expanded="taskCenterExpanded"
-      :running-count="runningCount"
-      :success-count="successCount"
-      :failed-count="failedCount"
-      :tasks="tasks"
-      @toggle="taskCenterExpanded = !taskCenterExpanded"
-      @open-local-path="openLocalPath"
+    <div id="section-tasks" class="anchor-target">
+      <TaskCenterPanel
+        :expanded="taskCenterExpanded"
+        :running-count="runningCount"
+        :success-count="successCount"
+        :failed-count="failedCount"
+        :tasks="tasks"
+        @toggle="taskCenterExpanded = !taskCenterExpanded"
+        @open-local-path="openLocalPath"
+      />
+    </div>
+
+    <div id="section-more" class="anchor-target">
+      <SiteSeoFooter />
+    </div>
+    </main>
+
+    <MindmapDialog
+      :visible="mindmapFullscreen"
+      :svg="mindmapSvg"
+      @update:visible="mindmapFullscreen = $event"
+      @close="closeMindmapFullscreen"
     />
 
-    <!-- 导图全屏弹窗 -->
-    <div v-if="mindmapFullscreen" class="mindmap-modal" @click.self="closeMindmapFullscreen">
-      <div class="mindmap-modal-content">
-        <div class="mindmap-modal-head">
-          <strong>思维导图全屏预览</strong>
-          <button class="open-btn" @click="closeMindmapFullscreen">关闭</button>
-        </div>
-        <div class="mindmap-modal-preview" v-html="mindmapSvg"></div>
-      </div>
-    </div>
+    <BillingDialog
+      :visible="billingDialogVisible"
+      :loading="billingHistoryLoading"
+      :orders="billingOrders"
+      @update:visible="billingDialogVisible = $event"
+      @close="closeBillingDialog"
+    />
+
+    <AuthDialog
+      :visible="authDialogVisible"
+      :mode="authMode"
+      :email="authEmail"
+      :password="authPassword"
+      :confirm-password="authConfirmPassword"
+      :action-token="authActionToken"
+      :loading="authLoading"
+      :error="authError"
+      :info="authInfo"
+      @update:visible="authDialogVisible = $event"
+      @update:email="authEmail = $event"
+      @update:password="authPassword = $event"
+      @update:confirm-password="authConfirmPassword = $event"
+      @update:action-token="authActionToken = $event"
+      @close="closeAuthDialog"
+      @switch-mode="switchAuthMode"
+      @register="registerAccount"
+      @login="loginAccount"
+      @reset-password="completePasswordReset"
+      @request-reset-email="requestPasswordResetEmail"
+      @back-login="openAuthDialog('login')"
+    />
   </div>
 </template>
 
@@ -697,6 +975,29 @@ onUnmounted(() => {
 @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@500;700;800&family=Manrope:wght@400;500;600;700&display=swap');
 
 /* 全局页面背景与基础字体 */
+:global(html) {
+  scroll-behavior: smooth;
+}
+
+.skip-to-workspace {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 10px 14px;
+  background: #1f6fff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  border-radius: 0 0 8px 0;
+}
+
+.skip-to-workspace:focus {
+  left: 14px;
+  top: 14px;
+}
+
 :global(body) {
   margin: 0;
   font-family: 'Manrope', sans-serif;
@@ -707,25 +1008,42 @@ onUnmounted(() => {
     #f2f6fc;
 }
 
-/* 页面根容器 */
+/* 整页自然滚动，不限制在单一视口高度内 */
 .app-shell {
-  height: 100vh;
+  position: relative;
+  min-height: 100vh;
   max-width: 1440px;
   margin: 0 auto;
-  padding: 14px;
+  padding: 14px 14px 40px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   box-sizing: border-box;
 }
 
-/* 桌面端双栏布局 */
+/* 主内容区：随文档流增高 */
+.studio-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.anchor-target {
+  scroll-margin-top: 72px;
+}
+
+@media (max-width: 960px) {
+  .anchor-target {
+    scroll-margin-top: 56px;
+  }
+}
+
+/* 桌面端双栏：给出足够操作高度，超出部分在列内滚动或由页面滚动 */
 .studio-layout {
   display: flex;
   gap: 10px;
-  flex: 1;
-  min-height: 0;
   align-items: stretch;
+  min-height: min(880px, 85vh);
 }
 
 /* 左栏（下载工作台） */
@@ -735,6 +1053,7 @@ onUnmounted(() => {
   max-width: 40%;
   min-height: 0;
   overflow: auto;
+  align-self: stretch;
 }
 
 /* 右栏（AI 总结） */
@@ -744,6 +1063,7 @@ onUnmounted(() => {
   max-width: 60%;
   min-height: 0;
   overflow: hidden;
+  align-self: stretch;
 }
 
 /* 导图全屏弹窗 */
@@ -798,6 +1118,165 @@ onUnmounted(() => {
   padding: 14px;
 }
 
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(23, 37, 66, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 80;
+}
+
+.auth-modal-card {
+  width: min(420px, 100%);
+  background: #fff;
+  border: 1px solid #d7e2f3;
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 18px 40px rgba(20, 38, 72, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-modal-card h3 {
+  margin: 0;
+  color: #162544;
+}
+
+.auth-subtitle {
+  margin: 0 0 4px;
+  color: #617399;
+  font-size: 13px;
+}
+
+.auth-label {
+  color: #2f4773;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-input {
+  border: 1px solid #cfdced;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font-size: 13px;
+  color: #1e3359;
+  outline: none;
+}
+
+.auth-input:focus {
+  border-color: #5b8fff;
+  box-shadow: 0 0 0 3px rgba(91, 143, 255, 0.2);
+}
+
+.auth-error {
+  margin: 2px 0;
+  color: #cb3b3b;
+  font-size: 12px;
+}
+
+.auth-info {
+  margin: 2px 0;
+  color: #1f6fff;
+  font-size: 12px;
+}
+
+.auth-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.auth-btn {
+  border: 1px solid #cfdced;
+  background: #fff;
+  color: #31476f;
+  border-radius: 10px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.auth-btn-primary {
+  border-color: #1f6fff;
+  background: #1f6fff;
+  color: #fff;
+}
+
+.auth-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.auth-switch {
+  margin-top: 2px;
+  border: none;
+  background: transparent;
+  color: #245fc6;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.auth-extra-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.auth-link-btn {
+  border: none;
+  background: transparent;
+  color: #395a92;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.billing-card {
+  width: min(680px, 100%);
+}
+
+.billing-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #dbe4f4;
+  border-radius: 10px;
+  background: #fbfdff;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.billing-item {
+  border: 1px solid #d5e1f2;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.billing-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #25395f;
+  font-size: 12px;
+}
+
+.billing-meta {
+  margin-top: 4px;
+  color: #5c7099;
+  font-size: 11px;
+}
+
 /* 平板与小屏：改为单列，并保持下载工作台在上 */
 @media (max-width: 1200px) {
   .studio-layout {
@@ -818,11 +1297,15 @@ onUnmounted(() => {
     flex: initial;
     max-width: none;
     overflow: visible;
+    min-height: 0;
   }
 
-  .app-shell {
-    height: auto;
-    min-height: 100vh;
+  .left-column {
+    min-height: 0;
+  }
+
+  .studio-layout {
+    min-height: 0;
   }
 
   .mindmap-modal {
