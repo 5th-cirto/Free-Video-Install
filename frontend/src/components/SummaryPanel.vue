@@ -64,13 +64,25 @@ const emit = defineEmits([
     <div class="result-body" v-if="hasAiContent">
       <!-- 摘要页签 -->
       <div v-if="aiViewTab === 'summary'">
-        <p class="meta"><strong>总结</strong></p>
-        <p class="content-text">{{ aiStreamingSummary || '等待结构化总结输出...' }}</p>
-        <div class="list-box" v-if="aiStreamingKeyPoints.length">
-          <p class="meta"><strong>核心要点</strong></p>
-          <ul>
-            <li v-for="(item, idx) in aiStreamingKeyPoints" :key="`point-${idx}`">{{ item }}</li>
-          </ul>
+        <article
+          v-if="aiStreamingSummary || aiStreamingKeyPoints.length"
+          class="prose prose-slate max-w-none prose-p:my-3 prose-li:my-1 prose-strong:text-slate-800"
+        >
+          <p class="meta !mb-2"><strong>总结</strong></p>
+          <p class="content-text">
+            {{ aiStreamingSummary || '等待结构化总结输出...' }}
+            <span v-if="aiLoading && aiStreamingSummary" class="typing-caret" aria-hidden="true"></span>
+          </p>
+          <div class="list-box" v-if="aiStreamingKeyPoints.length">
+            <p class="meta !mb-2"><strong>核心要点</strong></p>
+            <ul class="!my-0">
+              <li v-for="(item, idx) in aiStreamingKeyPoints" :key="`point-${idx}`">{{ item }}</li>
+            </ul>
+          </div>
+        </article>
+        <div v-else-if="aiLoading" class="typing-pending">
+          正在持续生成中...
+          <span class="typing-caret" aria-hidden="true"></span>
         </div>
         <details v-if="aiRaw" class="raw-debug">
           <summary>查看流式原始输出</summary>
@@ -211,6 +223,36 @@ h2 {
   font-size: 14px;
   color: #243457;
   line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.typing-pending {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #5d7098;
+}
+
+.typing-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 4px;
+  vertical-align: text-bottom;
+  background: #2563eb;
+  border-radius: 1px;
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes caret-blink {
+  0%,
+  48% {
+    opacity: 1;
+  }
+  49%,
+  100% {
+    opacity: 0;
+  }
 }
 
 .list-box ul {
